@@ -24,9 +24,9 @@ set /p dir=保存到哪个目录？直接回车用当前目录:
 if "%dir%"=="" set dir=%cd%
 
 if "%mode%"=="headless" (
-    python "scripts\AutoDownload_yz.py" --headless --download-dir "%dir%"
+    python "scripts\AutoDownload_xx.py" --headless --download-dir "%dir%"
 ) else (
-    python "scripts\AutoDownload_yz.py" --download-dir "%dir%"
+    python "scripts\AutoDownload_xx.py" --download-dir "%dir%"
 )
 
 echo.

@@ -13,7 +13,7 @@ agent_created: true
 
 | 脚本 | 产出 | 落到 |
 |------|------|------|
-| `scripts/AutoDownload_yz.py` | `中证可交换债券估值_YYYYMMDD.xlsx` | `<dir>/<日期>/` |
+| `scripts/AutoDownload_xx.py` | `中证可交换债券估值_YYYYMMDD.xlsx` | `<dir>/<日期>/` |
 | `scripts/AutoDownload_sz.py` | `现券交易信息（逐笔）.xlsx` | `<dir>/<日期>/` |
 
 日期不是今天，而是**从页面表格里抓出来的数据日期** —— 避免早上下 yesterday 数据却存成今天的目录。
@@ -31,7 +31,7 @@ xxxxx站点还需要 `config.ini`（从 `config.example.ini` 复制并填账号�
 
 ```bash
 # xxxxx：中证可交换债券估值（需登录 + 验证码识别）
-python scripts/AutoDownload_yz.py --download-dir D:\Data
+python scripts/AutoDownload_xx.py --download-dir D:\Data
 
 # 深交所：现券交易信息（逐笔）（免登录，自动筛选「非公开发行可交换公司债券」）
 python scripts/AutoDownload_sz.py --download-dir D:\Data

@@ -6,7 +6,7 @@ r"""可交换债数据.xlsx 重建脚本（通用版 / 可移植）
     上证固收成交明细.xlsx  —— 上证成交（手工从固收平台导出）
     可交债.xlsx            —— 标的清单（手工从 Wind 导出）
     现券交易信息（逐笔）.xlsx —— 深交所逐笔（AutoDownload_sz.py 自动下载）
-    中证可交换债券估值.xlsx  —— 中证估值（AutoDownload_yz.py 自动下载）
+    中证可交换债券估值.xlsx  —— 中证估值（AutoDownload_xx.py 自动下载）
 
 用法：
     python 可交换债数据.py 20260817              # 相对日期目录，相对 --base 解析

@@ -7,10 +7,10 @@ r"""xxxxx（xxxxx）中证可交换债券估值 —— 自动登录并下载
       <日期目录>/中证可交换债券估值_YYYYMMDD.xlsx
 
 用法：
-    python AutoDownload_yz.py                     # 有窗口模式（推荐，验证码失败可手动补）
-    python AutoDownload_yz.py --headless          # 无头模式（后台跑，识别不了验证码会跳过）
-    python AutoDownload_yz.py --download-dir D:\Data
-    python AutoDownload_yz.py --target-url <完整页面URL>   # 跳过菜单导航，直接操作该页
+    python AutoDownload_xx.py                     # 有窗口模式（推荐，验证码失败可手动补）
+    python AutoDownload_xx.py --headless          # 无头模式（后台跑，识别不了验证码会跳过）
+    python AutoDownload_xx.py --download-dir D:\Data
+    python AutoDownload_xx.py --target-url <完整页面URL>   # 跳过菜单导航，直接操作该页
 
 依赖：
     pip install playwright ddddocr pillow

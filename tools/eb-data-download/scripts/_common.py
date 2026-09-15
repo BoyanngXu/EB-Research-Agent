@@ -2,7 +2,7 @@
 """可交换债数据源自动下载 —— 公共工具模块
 
 提供：依赖自检、配置读取、元素点击候选策略、表格日期提取、下载保存。
-被 AutoDownload_yz.py / AutoDownload_sz.py 共用。
+被 AutoDownload_xx.py / AutoDownload_sz.py 共用。
 """
 import configparser
 import datetime
