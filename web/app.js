@@ -359,7 +359,7 @@ $('#dataDir').addEventListener('change', loadDataDates);
 $('#dataDate').addEventListener('change', loadSources);
 $('#btnRefreshDates').onclick = loadDataDates;
 
-$('#btnYz').onclick = () => runTask($('#btnYz'), '/api/data/download-yz',
+$('#btnXx').onclick = () => runTask($('#btnXx'), '/api/data/download-xx',
   { dir: $('#dataDir').value },
   '#dataLog', () => { loadDataDates(); listDataOut(); });
 $('#btnSz').onclick = () => runTask($('#btnSz'), '/api/data/download-sz',
@@ -1182,7 +1182,7 @@ const AST_CHIP_UTTER = {
   anno_check: '校验公告',
   anno_analyze: '帮我生成一键分析指令',
   data_rebuild: '重建数据总表',
-  data_download_yz: '下载中证估值',
+  data_download_xx: '下载中证估值',
   data_download_sz: '下载深交所逐笔',
   wechat_crawl: '抓取舆情热文',
   wechat_summarize: '总结今日午盘舆情',

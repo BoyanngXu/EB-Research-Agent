@@ -479,10 +479,10 @@ def h_data_sources(req):
     return _ok(**data.source_status(req.q("date"), req.q("dir")))
 
 
-def h_data_download_yz(req):
+def h_data_download_xx(req):
     body = req.body or {}
     # xxxxx需弹窗处理验证码，始终有窗口（headless=False）
-    t = data.download_yz(body.get("dir"))
+    t = data.download_xx(body.get("dir"))
     return _ok(task=t.snapshot(with_log=False))
 
 
@@ -708,7 +708,7 @@ ROUTES = [
 
     ("GET", re.compile(r"^/api/data/dates$"), h_data_dates),
     ("GET", re.compile(r"^/api/data/sources$"), h_data_sources),
-    ("POST", re.compile(r"^/api/data/download-yz$"), h_data_download_yz),
+    ("POST", re.compile(r"^/api/data/download-xx$"), h_data_download_xx),
     ("POST", re.compile(r"^/api/data/download-sz$"), h_data_download_sz),
     ("POST", re.compile(r"^/api/data/rebuild$"), h_data_rebuild),
 

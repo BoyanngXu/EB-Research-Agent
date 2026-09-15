@@ -28,7 +28,7 @@ def latest_date(data_dir=None):
 
 
 # ---------------------------------------------------------------- 下载
-def download_yz(download_dir=None, headless=False):
+def download_xx(download_dir=None, headless=False):
     """xxxxx：中证可交换债券估值（需登录 + 验证码识别）。"""
     d = download_dir or base.workspace("data")
     cmd = [base.python_exe(), base.script_path("eb-data-download", "AutoDownload_xx.py"),

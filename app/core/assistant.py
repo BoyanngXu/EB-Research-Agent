@@ -43,7 +43,7 @@ ACTIONS = [
     {"name": "data_rebuild", "label": "重建数据总表", "icon": "🔧", "mode": "auto",
      "keywords": ["重建", "重建数据", "重建总表", "数据整合", "整合数据"],
      "desc": "把 4 份源文件合成 15 列总表"},
-    {"name": "data_download_yz", "label": "下载中证估值", "icon": "⬇️", "mode": "auto",
+    {"name": "data_download_xx", "label": "下载中证估值", "icon": "⬇️", "mode": "auto",
      "keywords": ["下载估值", "下载中证", "xxxxx", "中证估值"],
      "desc": "xxxxx下载中证可交换债估值（需弹窗登录）"},
     {"name": "data_download_sz", "label": "下载深交所逐笔", "icon": "⬇️", "mode": "auto",
@@ -355,8 +355,8 @@ def _run(name, a, params):
         t = data.rebuild(date)
         return _task_out(t, a, "已启动重建任务（日期目录 %s）。" % date)
 
-    if name == "data_download_yz":
-        t = data.download_yz()
+    if name == "data_download_xx":
+        t = data.download_xx()
         return _task_out(t, a, "已启动下载（xxxxx）。会弹出浏览器窗口，请完成登录/验证码。")
 
     if name == "data_download_sz":
