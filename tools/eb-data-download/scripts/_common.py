@@ -61,7 +61,11 @@ def install_no_input():
 
 
 def load_config(section):
-    """读取 config.ini 中指定 section，返回 dict。缺失时给出明确提示。"""
+    """读取 config.ini 中指定 section，返回 dict。缺失时给出明确提示。
+
+    兼容性：若指定 section 不存在但文件里已有其它 section（例如用了自定义段名），
+    则自动采用第一个可用 section，避免因段名不一致而无法运行。
+    """
     if not os.path.exists(CONFIG_FILE):
         print("=" * 58)
         print(f"未找到配置文件：{CONFIG_FILE}")
@@ -76,9 +80,13 @@ def load_config(section):
     cp = configparser.ConfigParser()
     cp.read(CONFIG_FILE, encoding="utf-8-sig")
     if not cp.has_section(section):
-        print(f"[错误] config.ini 中缺少 [{section}] 配置段")
-        pause("\n按回车退出...")
-        sys.exit(1)
+        avail = cp.sections()
+        if avail:
+            section = avail[0]
+        else:
+            print(f"[错误] config.ini 中缺少 [{section}] 配置段")
+            pause("\n按回车退出...")
+            sys.exit(1)
     return {k: (v or "").strip() for k, v in cp.items(section)}
 
 
