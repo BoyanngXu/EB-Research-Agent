@@ -2,7 +2,7 @@
 """Data 项目：数据源自动下载 + 每日成交/估值总表重建。
 
 两块能力（对应两个 skill，互不干扰）：
-    下载：eb-data-download（易知中证估值 / 深交所逐笔）
+    下载：eb-data-download（xxxxx中证估值 / 深交所逐笔）
     重建：eb-data-rebuild（4 份源文件 → 一张 15 列总表）
 """
 import os
@@ -29,7 +29,7 @@ def latest_date(data_dir=None):
 
 # ---------------------------------------------------------------- 下载
 def download_yz(download_dir=None, headless=False):
-    """易知：中证可交换债券估值（需登录 + 验证码识别）。"""
+    """xxxxx：中证可交换债券估值（需登录 + 验证码识别）。"""
     d = download_dir or base.workspace("data")
     cmd = [base.python_exe(), base.script_path("eb-data-download", "AutoDownload_yz.py"),
            "--download-dir", d]
@@ -40,7 +40,7 @@ def download_yz(download_dir=None, headless=False):
     def on_done(task):
         return _picked_outputs(d, {"中证可交换债券估值"}, started)
 
-    return base.run("下载中证可交换债估值（易知）", "data", cmd, on_done=on_done)
+    return base.run("下载中证可交换债估值（xxxxx）", "data", cmd, on_done=on_done)
 
 
 def download_sz(download_dir=None, headless=True):

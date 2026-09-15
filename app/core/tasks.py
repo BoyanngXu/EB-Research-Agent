@@ -371,7 +371,7 @@ def run_stream(title, cmd, cwd=None, project="", env=None, on_done=None,
                     task.emit("依赖缺失：脚本在启动阶段就因缺少依赖库而退出（见上方 pip install 提示）。"
                               "请在 EB-Agent 的 .venv 里补装，例如：\n"
                               "  .venv\\Scripts\\python.exe -m pip install ddddocr\n"
-                              "（易知下载线还需 playwright / pillow，详见 requirements-extra.txt）", "warn")
+                              "（xxxxx下载线还需 playwright / pillow，详见 requirements-extra.txt）", "warn")
                 else:
                     task.emit("提示：该脚本若在无头/非交互环境下卡住，多半是在等你输入"
                               "（日期、验证码等）。平台调用时已尽量走非交互参数。", "warn")

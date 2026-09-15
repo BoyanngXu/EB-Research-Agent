@@ -15,7 +15,7 @@ agent_created: true
 | `上证固收成交明细.xlsx` | 手工从固收平台导出 |
 | `可交债.xlsx` | 手工从 Wind 导出（标的基础信息 + 排序依据） |
 | `现券交易信息（逐笔）.xlsx` | **eb-data-download** 自动下载（深交所） |
-| `中证可交换债券估值.xlsx` | **eb-data-download** 自动下载（易知） |
+| `中证可交换债券估值.xlsx` | **eb-data-download** 自动下载（xxxxx） |
 
 输出 —— `<日期目录>/可交换债数据.xlsx`，15 列：
 

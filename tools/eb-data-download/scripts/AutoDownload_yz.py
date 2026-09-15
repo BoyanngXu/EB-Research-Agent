@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-r"""易知（yizhi.poticat.com）中证可交换债券估值 —— 自动登录并下载
+r"""xxxxx（xxxxx）中证可交换债券估值 —— 自动登录并下载
 
 流程：打开登录页 → 自动填账号密码 → ddddocr 多模型投票识别验证码 →
       登录成功后导航到「中证可交换债券估值」→ 点查询 → 提取表格日期 →
@@ -38,8 +38,8 @@ C.install_no_input()
 from PIL import Image, ImageEnhance  # noqa: E402
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout  # noqa: E402
 
-LOGIN_URL = "https://yizhi.poticat.com/login"
-DOWNLOAD_API = "https://yizhi.poticat.com/api/bond/download-csicbvaluation"
+LOGIN_URL = "https://xxxxx/login"
+DOWNLOAD_API = "https://xxxxx/api/bond/download-csicbvaluation"
 MAX_LOGIN_RETRY = 3
 MAX_CAPTCHA_REFRESH = 6
 CAPTCHA_LEN = 5
@@ -174,8 +174,8 @@ def api_download(token, enddate, download_dir):
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json;charset=UTF-8",
-        "Origin": "https://yizhi.poticat.com",
-        "Referer": "https://yizhi.poticat.com/bond/csicbvaluation",
+        "Origin": "https://xxxxx",
+        "Referer": "https://xxxxx/bond/csicbvaluation",
         "Token": token,
         "User-Agent": "AutoDownload/1.0",
     }
@@ -253,23 +253,23 @@ MENU_XPATH = "/html/body/div[1]/div/div/div[1]/aside/div/div[1]/div/div/ul/li/ul
 
 
 def main():
-    ap = argparse.ArgumentParser(description="易知：中证可交换债券估值 自动下载")
+    ap = argparse.ArgumentParser(description="xxxxx：中证可交换债券估值 自动下载")
     ap.add_argument("--headless", action="store_true", help="无头模式（不弹窗）")
     ap.add_argument("--download-dir", default=os.getcwd(),
                     help="保存根目录（默认当前目录），实际保存到其下的 <表格日期>/ 子目录")
     ap.add_argument("--target-url", default=None, help="已知目标页完整 URL 时直接打开，跳过菜单导航")
     args = ap.parse_args()
 
-    cfg = C.load_config("yizhi")
+    cfg = C.load_config("xxxxx")
     email = cfg.get("email", "")
     password = cfg.get("password", "")
-    # 兜底 Token：易知站点的会话 Token 长期有效，页面自动提取经常失败（站点改版），
-    # 因此优先从 config.ini 的 [yizhi] 段读取 token。开源版本不再硬编码任何真实 Token，
+    # 兜底 Token：xxxxx站点的会话 Token 长期有效，页面自动提取经常失败（站点改版），
+    # 因此优先从 config.ini 的 [xxxxx] 段读取 token。开源版本不再硬编码任何真实 Token，
     # 请自行在 config.ini 中填写（见 config.ini.example）。
     HARDCODED_FALLBACK_TOKEN = ""
     fallback_token = cfg.get("token", "") or HARDCODED_FALLBACK_TOKEN
     if not email or not password:
-        print("[错误] config.ini 的 [yizhi] 段未填写 email / password")
+        print("[错误] config.ini 的 [xxxxx] 段未填写 email / password")
         C.pause("\n按回车退出...")
         return 1
 

@@ -15,7 +15,7 @@ r"""深交所 现券交易信息（逐笔）—— 自动下载
     pip install playwright
     playwright install chromium
 
-注意：导出前端触发、无登录要求，比易知站点稳定；导出按钮文本改版时
+注意：导出前端触发、无登录要求，比xxxxx站点稳定；导出按钮文本改版时
       调整下方 EXPORT_CANDIDATES 即可。
 """
 import argparse

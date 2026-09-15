@@ -44,8 +44,8 @@ ACTIONS = [
      "keywords": ["重建", "重建数据", "重建总表", "数据整合", "整合数据"],
      "desc": "把 4 份源文件合成 15 列总表"},
     {"name": "data_download_yz", "label": "下载中证估值", "icon": "⬇️", "mode": "auto",
-     "keywords": ["下载估值", "下载中证", "易知", "中证估值"],
-     "desc": "易知下载中证可交换债估值（需弹窗登录）"},
+     "keywords": ["下载估值", "下载中证", "xxxxx", "中证估值"],
+     "desc": "xxxxx下载中证可交换债估值（需弹窗登录）"},
     {"name": "data_download_sz", "label": "下载深交所逐笔", "icon": "⬇️", "mode": "auto",
      "keywords": ["下载逐笔", "下载深交所", "深交所"],
      "desc": "深交所现券交易逐笔（免登录）"},
@@ -357,7 +357,7 @@ def _run(name, a, params):
 
     if name == "data_download_yz":
         t = data.download_yz()
-        return _task_out(t, a, "已启动下载（易知）。会弹出浏览器窗口，请完成登录/验证码。")
+        return _task_out(t, a, "已启动下载（xxxxx）。会弹出浏览器窗口，请完成登录/验证码。")
 
     if name == "data_download_sz":
         t = data.download_sz()

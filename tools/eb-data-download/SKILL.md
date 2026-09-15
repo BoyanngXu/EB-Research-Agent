@@ -1,6 +1,6 @@
 ---
 name: eb-data-download
-description: 自动下载可交换债每日数据源。覆盖两个站点——易知（yizhi.poticat.com）的「中证可交换债券估值」，以及深交所（bond.szse.cn）的「现券交易信息（逐笔）」。自动处理登录验证码、菜单导航、表格日期识别，按日期建子目录归档。当用户说"下载可交换债数据""拉取今天的估值/逐笔成交""跑一下数据源下载"时使用。
+description: 自动下载可交换债每日数据源。覆盖两个站点——xxxxx（xxxxx）的「中证可交换债券估值」，以及深交所（bond.szse.cn）的「现券交易信息（逐笔）」。自动处理登录验证码、菜单导航、表格日期识别，按日期建子目录归档。当用户说"下载可交换债数据""拉取今天的估值/逐笔成交""跑一下数据源下载"时使用。
 agent_created: true
 ---
 
@@ -25,12 +25,12 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-易知站点还需要 `config.ini`（从 `config.example.ini` 复制并填账号密码）。深交所页面无需登录。
+xxxxx站点还需要 `config.ini`（从 `config.example.ini` 复制并填账号密码）。深交所页面无需登录。
 
 ## 用法
 
 ```bash
-# 易知：中证可交换债券估值（需登录 + 验证码识别）
+# xxxxx：中证可交换债券估值（需登录 + 验证码识别）
 python scripts/AutoDownload_yz.py --download-dir D:\Data
 
 # 深交所：现券交易信息（逐笔）（免登录，自动筛选「非公开发行可交换公司债券」）
@@ -38,15 +38,15 @@ python scripts/AutoDownload_sz.py --download-dir D:\Data
 ```
 
 常用参数：
-- `--headless` 无头后台运行。易知站点验证码识别失败时无头模式无法手动兜底，**首次运行建议有窗口**。
+- `--headless` 无头后台运行。xxxxx站点验证码识别失败时无头模式无法手动兜底，**首次运行建议有窗口**。
 - `--download-dir` 保存根目录，脚本会自动在其下建日期子目录。
 - `--target-url` / `--url` 页面改版时直接指定新地址，跳过菜单导航。
 
-Windows 用户双击 `运行_易知估值.bat` / `运行_深交所逐笔.bat` 即可，会交互式询问模式和目录。
+Windows 用户双击 `运行_估值下载.bat` / `运行_深交所逐笔.bat` 即可，会交互式询问模式和目录。
 
 ## 关键实现点
 
-**验证码识别**（易知）不是单次 OCR 就提交，而是：对同一张验证码生成 10 种预处理变体
+**验证码识别**（xxxxx）不是单次 OCR 就提交，而是：对同一张验证码生成 10 种预处理变体
 （原图 / 灰度 / 5 档阈值二值化 / 对比度增强，各配 2x、3x 放大），每种变体跑 ddddocr 的
 default 和 beta 两个模型，全部结果投票，**至少 2 票一致才采纳**，否则点击图片刷新重试，
 最多 6 轮。这是把识别成功率从"时灵时不灵"拉到稳定可用的关键。
@@ -62,7 +62,7 @@ default 和 beta 两个模型，全部结果投票，**至少 2 票一致才采�
 
 - **登录反复失败** → 改用有窗口模式，脚本会在自动识别失败后暂停等你手动输入验证码。
 - **点不到菜单/按钮** → 站点改版。有窗口模式下观察页面，把新选择器补进
-  `MENU_XPATH`（易知）或 `EXPORT_CANDIDATES`（深交所）。
+  `MENU_XPATH`（xxxxx）或 `EXPORT_CANDIDATES`（深交所）。
 - **playwright 报缺浏览器** → 执行 `playwright install chromium`。
 - **导出了全量债券而非只有可交换债** → 类别筛选 JS 失效了，加 `--no-category` 确认，
   然后改 `select_category()` 适配新的下拉结构。

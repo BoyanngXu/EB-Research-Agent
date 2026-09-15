@@ -481,7 +481,7 @@ def h_data_sources(req):
 
 def h_data_download_yz(req):
     body = req.body or {}
-    # 易知需弹窗处理验证码，始终有窗口（headless=False）
+    # xxxxx需弹窗处理验证码，始终有窗口（headless=False）
     t = data.download_yz(body.get("dir"))
     return _ok(task=t.snapshot(with_log=False))
 

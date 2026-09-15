@@ -8,5 +8,5 @@
 # 说明：chromium 内核默认装在 %LOCALAPPDATA%\ms-playwright，跟着 playwright 版本走；
 #       换 playwright 版本后要重新 install，否则报 "Executable doesn't exist"。
 playwright>=1.40       # 深交所自动下载（免登录）
-ddddocr>=1.4           # 易知自动下载：验证码 OCR
+ddddocr>=1.4           # xxxxx自动下载：验证码 OCR
 pillow>=10.0           # 验证码图片处理
