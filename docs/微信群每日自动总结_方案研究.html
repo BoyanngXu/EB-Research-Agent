@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微信群消息每日自动总结 · 实现方案研究</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --line:#e4e6eb; --ink:#1f2328; --muted:#5f6673;
+    --blue:#185fa5; --blue-bg:#e6f1fb; --teal:#0f6e56; --teal-bg:#e1f5ee;
+    --purple:#534ab7; --purple-bg:#eeedfe; --amber:#854f0b; --amber-bg:#faeeda;
+    --green:#3b6d11; --green-bg:#eaf3de; --red:#a32d2d; --red-bg:#fcebeb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.75;font-size:15px}
+  .wrap{max-width:940px;margin:0 auto;padding:40px 24px 80px}
+  header{border-bottom:3px solid var(--ink);padding-bottom:18px;margin-bottom:28px}
+  h1{font-size:26px;margin:0 0 8px;font-weight:600;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:13px}
+  h2{font-size:19px;margin:40px 0 14px;padding-left:11px;border-left:4px solid var(--blue);font-weight:600}
+  h3{font-size:16px;margin:24px 0 10px;font-weight:600;color:#2b3038}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:5px 0}
+  code{background:#eef0f3;padding:1px 6px;border-radius:4px;font-family:"Cascadia Mono",Consolas,monospace;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .tldr{background:var(--blue-bg);border:1px solid #b5d4f4;border-left:5px solid var(--blue)}
+  .tldr b{color:var(--blue)}
+  .warn{background:var(--red-bg);border:1px solid #f7c1c1;border-left:5px solid var(--red)}
+  .warn b{color:var(--red)}
+  .ok{background:var(--green-bg);border:1px solid #c0dd97;border-left:5px solid var(--green)}
+  .ok b{color:var(--green)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#eef0f3;font-weight:600}
+  tbody tr:nth-child(even){background:#fafbfc}
+  .pill{display:inline-block;padding:1px 9px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
+  .p-red{background:var(--red-bg);color:var(--red);border:1px solid #f09595}
+  .p-amber{background:var(--amber-bg);color:var(--amber);border:1px solid #ef9f27}
+  .p-green{background:var(--green-bg);color:var(--green);border:1px solid #97c459}
+  .p-gray{background:#eef0f3;color:#5f5e5a;border:1px solid #b4b2a9}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.two{grid-template-columns:1fr}}
+  .dolist{background:var(--green-bg);border:1px solid #c0dd97;border-radius:12px;padding:16px 20px}
+  .dontlist{background:var(--red-bg);border:1px solid #f7c1c1;border-radius:12px;padding:16px 20px}
+  .dolist h3,.dontlist h3{margin-top:0}
+  .flow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:16px 0;overflow-x:auto}
+  .step{display:flex;gap:14px;margin:14px 0;align-items:flex-start}
+  .num{flex:0 0 30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px}
+  .step-body{flex:1}
+  .step-body b{display:block;margin-bottom:2px}
+  .foot{margin-top:50px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  .kbd{font-size:12px;color:var(--muted)}
+  hr{border:none;border-top:1px solid var(--line);margin:30px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>微信群消息每日自动总结 · 实现方案研究</h1>
+  <div class="sub">EB-Agent 平台新需求预研 &nbsp;|&nbsp; 2026-09-15 &nbsp;|&nbsp; 红线：不触发风控、不封号</div>
+</header>
+
+<div class="card tldr">
+  <b>结论速览（TL;DR）</b>
+  <ol style="margin-bottom:0">
+    <li><b>红线只有两条：</b>① 绝不向微信「写入」（不发送 / 不回复 / 不群发 / 不加好友）；② 绝不「注入进程」或「伪造协议」。</li>
+    <li><b>风控主要盯「交互行为」，不盯「读取」。</b>只读、且不经过微信网络协议的数据，服务端几乎拿不到可判定的信号。</li>
+    <li><b>推荐方案：安卓系统通知监听（只读）→ 本地汇总 → 投递到微信之外的渠道。</b>风险等级低，成本可控。</li>
+    <li><b>明确排除：</b>Hook 注入（WeChatFerry/wcferry）、协议模拟（wechaty pad）、UI 自动化发送（wxauto 群发）——这三类是封号重灾区。</li>
+    <li><b>本地数据库解密（chatlog 类）不推荐：</b>技术上离线不可检测，但腾讯 2025-10 已向作者发函、2026-01 用 DMCA 下架了 4000+ 个相关仓库，法律与合规风险高。</li>
+    <li><b>不需要第二台手机。</b>封号风险与「哪台手机」无关——通知监听是系统级 API，微信看不到它。装在<b>主力机</b>上，账号风险与装在闲置机上完全一样。要解决的是耗电 / 后台被杀 / 隐私三件事，不是封号。</li>
+  </ol>
+</div>
+
+<div class="card warn">
+  <b>决策更新（2026-09-15）：改走「电脑版微信」，完全不经过手机</b>
+  <p>原因：能加投研群的号在主力机上，闲置机方案不成立。于是把战场移到 PC 端。<b>但 PC 微信的实测结果比预期严峻</b>——四条常见路子死了三条半，唯一可行的是「截图 + OCR」。</p>
+</div>
+
+<div class="card">
+  <b>PC 微信 4.0 专项实测结论（本机实测，非推测）</b>
+  <table>
+    <thead><tr><th>路径</th><th>实测结果</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>Windows 通知库<br><span class="kbd">wpndatabase.db</span></td><td><span class="pill p-red">不可用</span></td><td>库存在（197 个 handler、40 条通知），但<b>完全没有微信</b>——微信 4.0 不写系统 toast</td></tr>
+      <tr><td>UI Automation 读控件</td><td><span class="pill p-red">不可用</span></td><td>微信 4.0 是 <b>Qt 自绘</b>（窗口类 <code>Qt51514QWindowIcon</code>）。按句柄附加 UIA 后，树里<b>只有一个不透明渲染面板</b> <code>MMUIRenderSubWindowHW</code>，零控件、零文本</td></tr>
+      <tr><td>本地数据库解密</td><td><span class="pill p-red">红线</span></td><td>加密 + 腾讯 2026-01 DMCA 下架 4195 个仓库，不碰</td></tr>
+      <tr><td>Hook / 注入</td><td><span class="pill p-red">红线</span></td><td>必封，不碰</td></tr>
+      <tr style="background:#eaf3de"><td><b>截图 + OCR</b></td><td><span class="pill p-green">✅ 可行</span></td><td>PrintWindow 截取窗口（非黑图）+ RapidOCR 离线中文识别，1.4 秒出 15 个文本块，界面文字清晰可读</td></tr>
+    </tbody>
+  </table>
+  <p><b>根因：</b>微信 4.0 用 Qt 重写了整个客户端，是"自绘 UI + 不注册系统通知"的封闭实现，对任何基于 Windows 可访问性/通知的读取方式都免疫。这也解释了为什么开源项目 <code>wechat-notifier</code> 明确标注<b>「暂不支持微信 4.0」</b>（只适配 3.9+）。</p>
+</div>
+
+<div class="card ok">
+  <b>已交付：只读采集引擎</b>
+  <p><code>EB-Agent/tools/wxgroup/wx_read.py</code> —— 微信 4.0 电脑版的非侵入只读采集器：</p>
+  <ul>
+    <li><b>零微信交互</b>：PrintWindow 抓窗口像素 → OCR，从微信视角只是"屏幕被截了张图"，不产生任何发往服务器的请求。</li>
+    <li>已实现：窗口定位（自动找 Qt 微信主窗口）、窗口截图、离线中文 OCR、版面切分（会话列表 / 聊天区）、消息解析（时间分隔 / 发送者 / 内容 / 左右气泡）。</li>
+    <li>用法：<code>--probe</code> 看带坐标的原始 OCR、<code>--json</code> 出结构化结果、<code>--save</code> 存图核对。</li>
+  </ul>
+  <p style="margin-bottom:0"><b>下一步（待验证）：</b>需要在真实投研群上校准版面参数与解析规则；随后决定是否加"自动翻群 + 滚动"（<b>驱动客户端</b>，只读不发送，风险低-中）还是保持"人翻群、脚本只截图"（<b>零驱动</b>，最保守）。</p>
+</div>
+
+<h2>1. 需求拆解</h2>
+<div class="card">
+  <p><b>目标：</b>个人微信里有大量投研群，消息量远超人工消化能力，希望每天自动产出一份「群消息总结」。</p>
+  <p><b>硬约束：</b>不触发微信风控、更不能封号。这是压倒一切的前提。</p>
+  <p><b>容易被忽略的两条隐含约束：</b></p>
+  <ul>
+    <li><b>不能打扰群里其他人。</b>任何「机器人进群 / 自动回复 / 群内发总结」都会立刻暴露，且是封号高危行为。</li>
+    <li><b>总结结果应投递到微信之外。</b>把总结发回微信 = 主动触发「发送行为检测」，等于自己往枪口上撞。</li>
+  </ul>
+</div>
+
+<h2>2. 先搞清红线：微信到底靠什么检测</h2>
+<p>根据公开的风控分析与实战案例，微信对第三方/自动化的检测是<b>三维模型</b>，任何单一维度异常都可能触发：</p>
+<div class="card">
+<table>
+  <thead><tr><th>检测维度</th><th>关键指标（示例阈值）</th><th>触发后果</th></tr></thead>
+  <tbody>
+    <tr><td>行为特征</td><td>发送频率 &gt; 20 条/分钟、固定间隔、机械点击精度、深夜批量操作</td><td>临时限制发送</td></tr>
+    <tr><td>内容特征</td><td>诱导分享关键词、敏感词、重复模板内容</td><td>功能限制</td></tr>
+    <tr><td>环境特征</td><td>网络地址异常变动、设备指纹、非官方客户端特征</td><td>强制验证 / 封禁</td></tr>
+  </tbody>
+</table>
+<p>处罚是<b>渐进式</b>的：一级预警（消息延迟）→ 二级限制（朋友圈/群聊禁用）→ 三级临时封禁（24–72 小时）→ 四级永久限制部分功能 → 五级账号永久冻结。</p>
+</div>
+
+<div class="card warn">
+  <b>必封红线（碰一条就危险）</b>
+  <ul style="margin-bottom:0">
+    <li><b>Hook / 注入类</b>：Xposed / LSPosed / WeChatFerry / wcferry 等修改微信进程内存 → 检测概率极高，属「非官方客户端」直接证据。</li>
+    <li><b>协议模拟类</b>：逆向私有协议、wechaty pad 协议登录 → 圈内共识「黑产级别，别碰」。</li>
+    <li><b>批量发送 / 加好友 / 群发</b>：无论用什么技术实现，都是最高危行为。</li>
+    <li><b>深夜批量操作</b>：不符合人类作息的行为模式本身就是风控信号。</li>
+  </ul>
+</div>
+
+<div class="card ok">
+  <b>关键洞察：为什么「只读」相对安全？</b>
+  <p style="margin-bottom:0">风控的核心是识别「<b>异常交互</b>」——发消息、加人、改状态这些会与微信服务器产生写操作的举动。而<b>在系统层读取通知栏</b>或<b>离线读取本地文件</b>，不产生任何发往微信服务器的请求，服务端没有可判定的数据点。这就是「读写分离」能同时满足「可用」和「安全」的根本原因。</p>
+</div>
+
+<h2>3. 候选方案对比矩阵</h2>
+<p>把市面上能想到的路子全部列出来，按风险排序：</p>
+<div class="card">
+<table>
+  <thead><tr><th>方案</th><th>原理</th><th>是否碰协议/进程</th><th>封号风险</th><th>数据完整性</th><th>成本</th><th>结论</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Hook 注入<br><span class="kbd">WeChatFerry / wcferry</span></td>
+      <td>注入 DLL 修改微信进程内存</td>
+      <td>是（进程）</td>
+      <td><span class="pill p-red">极高</span></td>
+      <td>高</td><td>中</td>
+      <td><b>排除</b></td>
+    </tr>
+    <tr>
+      <td>协议模拟<br><span class="kbd">wechaty pad</span></td>
+      <td>逆向私有协议，伪造请求包</td>
+      <td>是（协议）</td>
+      <td><span class="pill p-red">极高</span></td>
+      <td>高</td><td>高</td>
+      <td><b>排除</b></td>
+    </tr>
+    <tr>
+      <td>UI 自动化<br><span class="kbd">wxauto</span></td>
+      <td>模拟鼠标键盘驱动官方客户端</td>
+      <td>否，但驱动客户端</td>
+      <td><span class="pill p-amber">中高</span></td>
+      <td>高</td><td>低</td>
+      <td>仅只读勉强可用，<b>不推荐</b></td>
+    </tr>
+    <tr style="background:#eaf3de">
+      <td><b>系统通知监听</b><br><span class="kbd">Android NLS</span></td>
+      <td>读取系统通知栏（微信自己弹出的通知）</td>
+      <td>否</td>
+      <td><span class="pill p-green">低</span></td>
+      <td>中</td><td>中</td>
+      <td><b>✅ 推荐</b></td>
+    </tr>
+    <tr style="background:#eaf3de">
+      <td><b>人工 / 半自动导出</b></td>
+      <td>手动复制、截图 + OCR</td>
+      <td>否</td>
+      <td><span class="pill p-green">零</span></td>
+      <td>中</td><td>低</td>
+      <td><b>✅ 备选</b></td>
+    </tr>
+    <tr>
+      <td>本地 DB 离线解密<br><span class="kbd">chatlog 类</span></td>
+      <td>读进程内存取密钥 → 解密本地 SQLite</td>
+      <td>否（离线）</td>
+      <td><span class="pill p-amber">技术低 / 法律高</span></td>
+      <td>高</td><td>高</td>
+      <td><b>不推荐</b>（已被腾讯追责）</td>
+    </tr>
+    <tr>
+      <td>官方开放平台</td>
+      <td>公众号 / 企业微信官方 API</td>
+      <td>官方</td>
+      <td><span class="pill p-green">无</span></td>
+      <td>仅覆盖公众号/企微</td><td>中</td>
+      <td>不覆盖个人微信群，可作<b>投递通道</b></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>关于「本地数据库解密」为什么不推荐</h3>
+<div class="card warn">
+  <p>这条路线技术上确实诱人——纯离线，微信服务端<b>完全检测不到</b>。但现实是：</p>
+  <ul>
+    <li><b>2025 年 7 月</b>，腾讯首次向 GitHub 发通知要求下架相关工具，GitHub 当时未处理。</li>
+    <li><b>2025 年 10 月</b>，知名工具 <code>chatlog</code> 作者收到微信官方函件，指其核心功能存在合规风险，项目停止维护。</li>
+    <li><b>2026 年 1 月</b>，腾讯走 DMCA 法律流程，一次下架 <b>4195 个</b>仓库（明列 38 个 + 连带 fork）。</li>
+    <li>使用前提是<b>降级微信并永久关闭自动更新</b>，维护成本高、随时失效。</li>
+  </ul>
+  <p style="margin-bottom:0">结论：<b>它能规避「风控」，但规避不了「法律与合规风险」。</b>既然你的红线是「不触发风控甚至封号」，那更不该引入一个腾讯正在主动追责的路线。除非是纯个人自用、绝不上传、且自行承担风险，否则不建议。</p>
+</div>
+
+<h2>4. 推荐架构：读写分离 + 永不回写</h2>
+<p>核心思想一句话：<b>用系统原生只读通道把消息「取出来」，在微信之外完成汇总与投递，全程不向微信写入一个字节。</b></p>
+
+<div class="flow">
+<svg viewBox="0 0 900 430" width="100%" style="min-width:820px" role="img" aria-label="推荐架构图">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#5f6673" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="860" height="130" rx="16" fill="#e6f1fb" stroke="#185fa5" stroke-width="1"/>
+  <text x="40" y="46" font-size="15" font-weight="600" fill="#042c53">① 采集层 · 安卓手机（只读，不碰微信进程）</text>
+  <rect x="44" y="62" width="180" height="70" rx="9" fill="#fff" stroke="#185fa5"/>
+  <text x="134" y="90" font-size="14" text-anchor="middle" fill="#042c53">微信 App</text>
+  <text x="134" y="112" font-size="12" text-anchor="middle" fill="#185fa5">弹出系统通知</text>
+  <rect x="264" y="62" width="230" height="70" rx="9" fill="#fff" stroke="#185fa5"/>
+  <text x="379" y="88" font-size="14" text-anchor="middle" fill="#042c53">通知监听服务</text>
+  <text x="379" y="110" font-size="12" text-anchor="middle" fill="#185fa5">NotificationListenerService</text>
+  <rect x="534" y="62" width="322" height="70" rx="9" fill="#fff" stroke="#185fa5"/>
+  <text x="695" y="88" font-size="14" text-anchor="middle" fill="#042c53">解析为 JSON（群名 / 发送者 / 内容 / 时间）</text>
+  <text x="695" y="110" font-size="12" text-anchor="middle" fill="#185fa5">低代码可用 MacroDroid / Tasker</text>
+  <line x1="224" y1="97" x2="260" y2="97" stroke="#5f6673" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="494" y1="97" x2="530" y2="97" stroke="#5f6673" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <line x1="450" y1="150" x2="450" y2="182" stroke="#5f6673" stroke-width="1.8" marker-end="url(#a)"/>
+  <text x="470" y="172" font-size="12" fill="#5f6673">局域网 HTTP POST</text>
+
+  <rect x="20" y="186" width="860" height="130" rx="16" fill="#eeedfe" stroke="#534ab7" stroke-width="1"/>
+  <text x="40" y="212" font-size="15" font-weight="600" fill="#26215c">② 汇总层 · PC 上的 EB-Agent 平台（本地，不联网上传）</text>
+  <rect x="44" y="228" width="200" height="72" rx="9" fill="#fff" stroke="#534ab7"/>
+  <text x="144" y="256" font-size="14" text-anchor="middle" fill="#26215c">新模块 wxgroup</text>
+  <text x="144" y="278" font-size="12" text-anchor="middle" fill="#534ab7">接收 API + SQLite</text>
+  <rect x="284" y="228" width="200" height="72" rx="9" fill="#fff" stroke="#534ab7"/>
+  <text x="384" y="256" font-size="14" text-anchor="middle" fill="#26215c">按群 / 按天聚合</text>
+  <text x="384" y="278" font-size="12" text-anchor="middle" fill="#534ab7">去重 · 清洗 · 分段</text>
+  <rect x="524" y="228" width="332" height="72" rx="9" fill="#fff" stroke="#534ab7"/>
+  <text x="690" y="256" font-size="14" text-anchor="middle" fill="#26215c">每日定时（如 18:30）调 LLM 汇总</text>
+  <text x="690" y="278" font-size="12" text-anchor="middle" fill="#534ab7">观点 / 数据 / 情绪 / 待办</text>
+  <line x1="244" y1="264" x2="280" y2="264" stroke="#5f6673" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="484" y1="264" x2="520" y2="264" stroke="#5f6673" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <line x1="450" y1="316" x2="450" y2="348" stroke="#5f6673" stroke-width="1.8" marker-end="url(#a)"/>
+
+  <rect x="20" y="352" width="860" height="62" rx="16" fill="#eaf3de" stroke="#3b6d11" stroke-width="1"/>
+  <text x="40" y="376" font-size="15" font-weight="600" fill="#173404">③ 投递层 · 只在微信之外（绝不发回微信群）</text>
+  <rect x="44" y="382" width="270" height="26" rx="6" fill="#fff" stroke="#3b6d11"/>
+  <text x="179" y="399" font-size="12.5" text-anchor="middle" fill="#173404">EB-Agent 网页日报（首选）</text>
+  <rect x="330" y="382" width="270" height="26" rx="6" fill="#fff" stroke="#3b6d11"/>
+  <text x="465" y="399" font-size="12.5" text-anchor="middle" fill="#173404">企业微信群机器人 Webhook（官方合规）</text>
+  <rect x="616" y="382" width="240" height="26" rx="6" fill="#fff" stroke="#3b6d11"/>
+  <text x="736" y="399" font-size="12.5" text-anchor="middle" fill="#173404">邮件 / 飞书 / 本地 docx</text>
+</svg>
+</div>
+
+<div class="card">
+  <p><b>为什么这个架构安全：</b></p>
+  <ul>
+    <li><b>采集层</b>用的是安卓系统给第三方应用开放的合法通道（无障碍/通知读取的公开 API），不注入、不改包、不抓协议，从系统视角看只是一个「增强版通知管理工具」。</li>
+    <li><b>汇总层</b>完全离线跑在你自己电脑上，数据不出本机。</li>
+    <li><b>投递层</b>刻意绕开微信——这是把风险压到最低的关键一步：<b>没有任何写回微信的动作，就没有任何「异常交互」可被检测。</b></li>
+  </ul>
+</div>
+
+<h2>5. 落地步骤</h2>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+  <b>就用主力机（无需第二台手机）</b>
+  风险与设备无关：通知监听是系统级 API，微信看不到它，装在主力机上不会增加封号风险。要解决的是耗电 / 后台被杀 / 隐私三件事（见下方「主力机部署」）。若主力机是 iOS，改走 PC 微信路径或半自动导出。
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+  <b>目标群做两处设置</b>
+  ① 关闭该群的「消息免打扰」（免打扰后系统不弹通知，就抓不到）；② 微信通知设置里打开「显示消息详情」，否则只能拿到「你收到一条消息」。
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="step-body">
+  <b>安卓端实现（两条路，二选一）</b>
+  <ul>
+    <li><b>低代码（推荐先试）：</b>用 MacroDroid / Tasker，配置「收到微信通知」触发 → 「HTTP 请求」动作，把通知内容 POST 到电脑。无需写代码，半小时能跑通。</li>
+    <li><b>自研（更稳）：</b>写一个继承 <code>NotificationListenerService</code> 的小 App，自己控制去重、长文本拼接、断线重传。适合长期维护。</li>
+  </ul>
+</div></div>
+
+<div class="step"><div class="num">4</div><div class="step-body">
+  <b>PC 端接入 EB-Agent</b>
+  新增一个 <code>wxgroup</code> 项目模块（与现有 Data / Anno / Wechat 并列）：
+  接收接口 → SQLite 落库 → 按群/按天聚合 → 复用现有 LLM 客户端做汇总 → 前端新增「微信群日报」页面。
+</div></div>
+
+<div class="step"><div class="num">5</div><div class="step-body">
+  <b>定时任务</b>
+  每日收盘后（如 18:30）自动跑汇总，产出日报。可接入平台已有的任务/日志体系。
+</div></div>
+
+<div class="step"><div class="num">6</div><div class="step-body">
+  <b>投递与监控</b>
+  日报只推送到 EB-Agent 网页 / 企业微信群机器人 / 邮件；同时对「消息条数异常」「手机掉线」做告警。一旦微信出现任何「操作频繁」提示，立即停止采集。
+</div></div>
+
+<h3>主力机部署：风险不变，重点解决三件事</h3>
+<div class="card ok">
+  <p style="margin-bottom:0"><b>先纠正一个前提：封号风险跟「哪台手机」无关。</b>通知监听走的是安卓系统给第三方应用开放的公开 API，不注入微信、不抓协议、不驱动客户端，微信服务端拿不到任何信号。所以把它装在<b>主力机</b>上，微信账号的风险与装在闲置机上<b>完全一样</b>。真正要解决的是下面三个工程问题。</p>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>问题</th><th>表现</th><th>解决办法</th></tr></thead>
+  <tbody>
+    <tr><td>耗电</td><td>常驻监听增加耗电</td><td>用轻量工具（MacroDroid 本身极轻）；设置只在交易时段（如 9:00–18:00）监听</td></tr>
+    <tr><td>后台被杀</td><td>国产 ROM 冻结后台 → 漏消息</td><td>关闭该 App 的电池优化、锁定后台任务、加白名单；优先用「通知类」而非「无障碍类」实现</td></tr>
+    <tr><td>隐私顾虑</td><td>一个 App 能读所有通知</td><td>配置里<b>只处理 <code>com.tencent.mm</code></b> 的通知，其余一律忽略；数据只走局域网、不联网；自研 App 代码完全可控</td></tr>
+  </tbody>
+</table>
+<p style="margin-bottom:0"><b>关键：只用「通知监听（NLS）」，不要用「无障碍服务（Accessibility）」。</b>前者只读通知、微信不可见；后者能模拟点击、属自动化特征，风险明显更高。</p>
+</div>
+
+<h3>不同主力机系统的路径</h3>
+<div class="card">
+<table>
+  <thead><tr><th>主力机</th><th>可行路径</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>安卓</b></td>
+      <td>① 主力机装通知监听（MacroDroid / 自研 NLS App）<br>② PC 微信 + 电脑侧捕获<br>③ 投屏 OCR</td>
+      <td>首选 ①，最可靠实时；不想装 App 可选 ②/③</td>
+    </tr>
+    <tr>
+      <td><b>iOS</b></td>
+      <td>① PC 微信（手机 + 电脑双端同时在线）+ 电脑侧捕获<br>② 半自动导出（截图 OCR / 手动复制）</td>
+      <td>iOS <b>无通知监听 API</b>，不能在手机侧自动读通知；本地解密工具属腾讯追责范围，不用</td>
+    </tr>
+  </tbody>
+</table>
+<p style="margin-bottom:0"><b>补充说明：</b>「电脑端 ADB 轮询 <code>dumpsys notification</code>」这条看似省事的路已排除——自 Android 6.0 起系统屏蔽了通知正文，只能拿到包名与通知 ID，读不到消息内容。</p>
+</div>
+
+<h2>6. 红线清单</h2>
+<div class="two">
+  <div class="dolist">
+    <h3>✅ 可以做</h3>
+    <ul>
+      <li>只读：通知监听、截图 OCR、人工复制</li>
+      <li>用系统原生公开 API</li>
+      <li>数据只存本机、只走局域网</li>
+      <li>总结投递到微信之外的渠道</li>
+      <li>投研群消息做脱敏后入库</li>
+    </ul>
+  </div>
+  <div class="dontlist">
+    <h3>⛔ 绝对不做</h3>
+    <ul>
+      <li>发送 / 回复 / 群发 / 加好友</li>
+      <li>Hook 注入、Xposed、WeChatFerry</li>
+      <li>协议登录、wechaty pad</li>
+      <li>把总结发回微信群</li>
+      <li>降级微信、关闭自动更新去适配工具</li>
+      <li>把群消息原文上传到公网大模型</li>
+    </ul>
+  </div>
+</div>
+
+<h2>7. 局限与风险（诚实说清）</h2>
+<div class="card">
+  <ul>
+    <li><b>会漏消息：</b>通知监听只能抓「弹出来的通知」。免打扰群、系统杀后台、微信前台打开时、通知被聚合折叠时，都可能漏。</li>
+    <li><b>拿不到历史：</b>只能从开启监听那一刻起，无法回溯之前的群消息。</li>
+    <li><b>长文本可能被截断：</b>部分机型通知栏会截断长消息，需要做「拼接 + 标记不完整」处理。</li>
+    <li><b>iOS 不支持：</b>只能用半自动导出方案。</li>
+    <li><b>摘要质量取决于清洗：</b>群消息噪音大（表情、闲聊、广告），需要按关键词/发言人做过滤再喂模型。</li>
+    <li><b>「低风险」不等于「零风险」：</b>即使是系统通道，若采集行为异常（如高频读写、异常进程行为）理论上仍可能被关注，因此仍建议用闲置机、保持低频。</li>
+  </ul>
+</div>
+
+<h2>8. 合规与隐私提示</h2>
+<div class="card warn">
+  <ul style="margin-bottom:0">
+    <li>群消息包含<b>他人的发言</b>，属于个人信息。务必做到：<b>仅自己设备、仅自己可见、不上传公网、不外传</b>。</li>
+    <li>上传到大模型前，建议对真人姓名、手机号、身份证等做<b>脱敏</b>（如「张三」→「成员A」）。</li>
+    <li>参考腾讯对聊天记录导出工具的立场（2026-01 DMCA 事件），个人自用、不传播是底线。</li>
+    <li>本方案定位为<b>个人效率工具</b>，不得用于骚扰、营销、群发等场景。</li>
+  </ul>
+</div>
+
+<h2>9. 下一步建议</h2>
+<div class="card ok">
+  <p><b>建议先做「最小验证」，再决定是否重投入：</b></p>
+  <ol style="margin-bottom:0">
+    <li><b>Day 1：</b>在<b>主力机</b>上装 MacroDroid，把 1–2 个核心投研群的通知 POST 到电脑的一个临时接收页，跑一整天（风险与闲置机相同，只多花一点电）。</li>
+    <li><b>评估覆盖率：</b>对比手机上的实际消息条数，看抓到了多少（经验值 70%–90%）。</li>
+    <li><b>若覆盖率够用</b> → 在 EB-Agent 正式落地 <code>wxgroup</code> 模块 + 前端日报页。</li>
+    <li><b>若不够用</b> → 评估「半自动导出」补足，或与群主协商是否有公众号/星球等更规范的信源。</li>
+  </ol>
+</div>
+
+<div class="foot">
+  本报告基于公开资料与风控分析整理，仅供个人效率工具选型参考。<br>
+  核心原则：<b>只读、离线、永不回写微信</b>。任何需要「向微信发送内容」或「修改微信进程/协议」的方案，一律不在考虑范围内。
+</div>
+
+</div>
+</body>
+</html>

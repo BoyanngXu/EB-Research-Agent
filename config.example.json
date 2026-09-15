@@ -1,0 +1,20 @@
+{
+  "llm": {
+    "backend": "api",
+    "api_key": "在此填入你的 OpenAI 兼容平台 API Key（如商汤 / DeepSeek / 智谱…）",
+    "base_url": "https://token.sensenova.cn/v1",
+    "model": "deepseek-v4-flash",
+    "fallback_models": ["deepseek-v4-flash"],
+    "temperature": 0.2,
+    "timeout": 180,
+    "env_key": "SHANGTANG_API_KEY"
+  },
+  "python": { "executable": "" },
+  "server": { "host": "127.0.0.1", "port": 8765, "open_browser": true },
+  "anno": { "summary_min": 130, "summary_max": 320, "max_pdf_chars": 60000, "backend": "api", "model": "hy3" },
+  "wechat": { "default_count": 10 },
+  "report": { "model": "hy3", "max_txt_chars": 60000 },
+  "assistant": { "enabled": true, "backend": "api", "model": "", "temperature": 0.3, "timeout": 120, "need_confirm": true, "max_ctx_chars": 12000, "max_history": 12 },
+  "memory": { "enabled": true, "keep_days": 60, "search_topk": 5 },
+  "datareader": { "index_enabled": true, "max_rows": 3000, "snippet_chars": 1200 }
+}

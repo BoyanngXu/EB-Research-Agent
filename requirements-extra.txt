@@ -1,0 +1,12 @@
+# EB-Agent 可选依赖：只有「自动下载数据源」这条线才需要
+# 体积大（playwright 浏览器内核约 700MB、ddddocr 带 onnxruntime 约 200MB），不默认装。
+#
+# 安装：
+#   .venv\Scripts\python.exe -m pip install -r requirements-extra.txt
+#   .venv\Scripts\python.exe -m playwright install chromium
+#
+# 说明：chromium 内核默认装在 %LOCALAPPDATA%\ms-playwright，跟着 playwright 版本走；
+#       换 playwright 版本后要重新 install，否则报 "Executable doesn't exist"。
+playwright>=1.40       # 深交所自动下载（免登录）
+ddddocr>=1.4           # 易知自动下载：验证码 OCR
+pillow>=10.0           # 验证码图片处理

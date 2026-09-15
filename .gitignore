@@ -1,0 +1,35 @@
+# ===== 依赖 / 环境 =====
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv.bak/
+
+# ===== 密钥 / 凭证（绝不提交真实文件，只用 .example 模板）=====
+config.json
+tools/eb-data-download/config.ini
+
+# ===== 运行时产物（日志 / 任务记录 / 缓存，可能含真实数据路径与内容）=====
+runtime/
+*.log
+.pytest_cache/
+.mypy_cache/
+.IDE/
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+*.swp
+*~
+*.bak
+*.bak.*
+
+# ===== 备选：前端构建产物（当前为静态文件，正常不生成）=====
+node_modules/
+dist/
+
+# 含真实晨会研究样本，不入库（本地保留即可）
+tools/eb-report/golden_example.json

@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EB 投研 Agent 平台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">EB 投研 <span>Agent</span> 平台</div>
+  <div class="tabs">
+    <button class="tab active" data-page="assistant">对话助手</button>
+    <button class="tab" data-page="data">数据 Data</button>
+    <button class="tab" data-page="anno">公告 Anno</button>
+    <button class="tab" data-page="wechat">舆情 Wechat</button>
+    <button class="tab" data-page="report">晨会 Report</button>
+    <button class="tab" data-page="overview-settings">设置</button>
+  </div>
+  <div class="topbar-right">
+    <span class="faint mono" id="envLine">环境检测中…</span>
+    <span class="dot" id="llmDot" title="模型 API 状态"></span>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ============================ 对话助手 ============================ -->
+<section class="page active" id="page-assistant">
+  <div class="grid2 ast-grid">
+    <div class="card">
+      <h3>对话助手
+        <button type="button" class="badge mode-pill" id="astModeBadge">–</button>
+        <span class="faint" id="astSessionLabel" style="font-size:12px"></span>
+      </h3>
+      <p class="desc">直接问三个项目的内容细节（如「某只债风险如何」），或用自然语言驱动功能（「重建数据」「抓取舆情」）。能查到的数据会标注来源。</p>
+
+      <div class="model-bar" id="assistantModels"></div>
+      <p class="faint" id="astModelNote" style="margin:2px 0 10px;font-size:12px"></p>
+
+      <div id="chatBox" class="chat"><div class="empty">输入问题开始。试试下面的快捷指令。</div></div>
+
+      <div class="chat-composer">
+        <div id="chipRow" class="chips"></div>
+
+        <div class="chat-in">
+          <button type="button" class="btn-ghost" id="btnPromptHist" title="历史 prompt（点选填入输入框）">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </button>
+          <div class="chat-input-pill">
+            <textarea id="chatInput" rows="2"
+              placeholder="问「帮我重建数据」「某只 EB 风险如何」，Enter 发送，Shift+Enter 换行"></textarea>
+            <button class="btn-primary" id="btnSend">发送</button>
+          </div>
+          <div id="promptHistPop" class="prompt-pop hidden">
+            <div class="prompt-pop-head">历史 prompt <span class="faint">（点选填入输入框）</span></div>
+            <div id="promptHistList" class="prompt-list"><div class="empty">加载中…</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>可用数据源</h3>
+        <div id="astCtx" class="filelist"><div class="empty">加载中…</div></div>
+      </div>
+      <div class="card">
+        <h3>历史会话</h3>
+        <div class="toolbar" style="margin-bottom:8px">
+          <button class="btn-sm" id="btnNewChat">＋ 新对话</button>
+          <button class="btn-sm" id="btnHist">刷新列表</button>
+        </div>
+        <div id="astHist" class="filelist"><div class="empty">暂无历史会话</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 数据 ============================ -->
+<section class="page" id="page-data">
+  <div class="data-cols">
+    <div class="data-col">
+      <div class="card">
+        <h3>1 · 下载数据源</h3>
+        <p class="desc">两个来源各下各的，下完落在 <span class="mono">&lt;数据目录&gt;/&lt;数据日期&gt;/</span>。首次登录易知需弹窗扫码/输验证码，请保持下载窗口可见。</p>
+        <div class="row">
+          <div class="field"><label>数据根目录</label><input type="text" id="dataDir"></div>
+          <button id="btnYz">下载中证估值（易知）</button>
+          <button id="btnSz">下载深交所逐笔</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>3 · 结果</h3>
+        <div class="toolbar">
+          <button id="btnOpenDataDir">打开数据目录</button>
+          <button id="btnListDataOut">列出产出文件</button>
+          <span class="spacer"></span>
+          <span class="faint">点文件名预览</span>
+        </div>
+        <div id="dataOut" class="filelist"><div class="empty">尚未生成</div></div>
+        <div id="dataPreview" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <div class="data-col">
+      <div class="card">
+        <h3>2 · 重建成交估值总表</h3>
+        <p class="desc">把 4 份源文件合成一张 15 列总表。源文件缺哪份，下面会标红。</p>
+        <div class="row">
+          <div class="field"><label>日期目录</label><select id="dataDate"></select></div>
+          <button class="btn-primary" id="btnRebuild">重建总表</button>
+          <button id="btnRefreshDates">刷新</button>
+        </div>
+        <div id="srcStatus" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>任务日志</h3>
+    <div class="log" id="dataLog"></div>
+  </div>
+</section>
+
+<!-- ============================ 公告 ============================ -->
+<section class="page" id="page-anno">
+
+  <div class="card" id="analyzeCard">
+    <h3>① 一键分析（交给 AI 工作台执行）</h3>
+    <p class="desc">填好「公告目录」与「输出目录」，点按钮生成一份<strong>控制指令</strong>。复制它交给 WorkBuddy 或其他 AI 工作台，由它模拟你的操作自动驱动本平台跑完整条流程：转储 → AI 精读 → 生成整理表。<b>本平台只负责生成指令，真正的执行在 AI 工作台一侧。</b></p>
+    <div class="row">
+      <div class="field"><label>公告目录（PDF 所在）</label>
+        <div class="input-btn"><input type="text" id="analyzeAnnoDir" placeholder="如 C:/Users/<用户名>/Desktop/Anno"><button type="button" class="btn-sm browse" data-target="analyzeAnnoDir">浏览…</button></div>
+      </div>
+      <div class="field"><label>输出目录（整理表落盘）</label>
+        <div class="input-btn"><input type="text" id="analyzeOutDir" placeholder="如 C:/Users/<用户名>/Desktop/Anno/out"><button type="button" class="btn-sm browse" data-target="analyzeOutDir">浏览…</button></div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn-primary" id="btnAnalyze">生成分析指令（需 AI 工作台）</button>
+      <button id="btnCopyPrompt" style="display:none">复制指令</button>
+      <span class="faint">生成后复制，粘贴进 AI 工作台对话框即可</span>
+    </div>
+    <textarea id="analyzePrompt" class="bridge-result" rows="13" readonly style="display:none;margin-top:10px"></textarea>
+  </div>
+
+  <div class="card" id="annoProgressCard" style="display:none">
+    <h3>执行进度</h3>
+    <div class="pp">
+      <div class="pp-line"><span class="pp-k">阶段</span><b id="ppPhase">-</b></div>
+      <div class="pp-line"><span class="pp-k">文件</span><span id="ppFileTxt">0/0</span><span class="faint" id="ppFileName" style="margin-left:8px"></span></div>
+      <div class="progress"><div id="ppFileBar"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>1 · 转储公告 PDF</h3>
+    <p class="desc">把目录里的 PDF 转成 txt。扫描件（无文字层）会自动渲染成 PNG 图片，精读时由模型读取图片识别文字，无需手动处理。</p>
+    <div class="row">
+      <div class="field" style="flex:1"><label>公告目录（沿用上方「① 一键分析」中的目录）</label><span class="mono faint" id="dumpDirHint">—</span></div>
+      <button id="btnDump">开始转储</button>
+      <span class="badge ok" id="dumpDone" style="display:none">✓ 转储完成</span>
+    </div>
+    <label class="check"><input type="checkbox" id="dumpClean" checked> 转储前删除原有 txt（避免残留旧文件）</label>
+  </div>
+
+  <div class="card">
+    <h3>2 · AI 精读提炼 <button type="button" class="badge mode-pill" id="annoBackendBadge">–</button></h3>
+    <p class="desc">逐份读转储文本，按「事件/要点式」提炼 9 个字段。<b>这一步必须模型来做</b> —— 条款散落在 PDF 各处，脚本读不懂。</p>
+    <div class="row">
+      <div class="field"><label>模型</label><select id="annoModel"></select></div>
+      <button id="btnLoadTxt">刷新文本清单</button>
+      <button id="btnSelAll">全选</button>
+      <button class="btn-primary" id="btnDigest">开始精读</button>
+    </div>
+    <div id="txtList" class="filelist" style="margin-top:10px"><div class="empty">请先转储，或点刷新</div></div>
+    <div class="progress" id="annoProgress" style="display:none"><div></div></div>
+  </div>
+
+  <div class="card" id="bridgeCard" style="display:none">
+    <h3>WorkBuddy 桥接 · 待处理 prompt</h3>
+    <p class="desc">后端设为「WorkBuddy 桥接」后，AI 精读不调云端，而是把每份公告的 prompt 写到这里。复制对应 prompt 交给 WorkBuddy 运行，把返回的 JSON 贴到「结果」框，点「提交」，任务会自动续跑。</p>
+    <div class="toolbar">
+      <button id="btnRefreshBridge">刷新</button>
+    </div>
+    <div id="bridgeList" class="filelist"><div class="empty">暂无待处理 prompt</div></div>
+  </div>
+
+  <div class="card">
+    <h3>3 · 校验并生成整理表</h3>
+    <p class="desc">脚本负责校验（必填缺失、摘要字数、<b>重复行</b>）和排版，列宽对齐成品大表，可整行粘进《每日可交换债公告整理.xlsx》。</p>
+    <div class="toolbar">
+      <button id="btnAnnoSave">保存精读结果</button>
+      <button id="btnAnnoCheck">只校验</button>
+      <button class="btn-primary" id="btnAnnoBuild">生成整理表</button>
+    </div>
+    <div id="annoRows" style="margin-top:12px"></div>
+    <div id="annoOut" class="filelist" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h3>任务日志</h3>
+    <div class="log" id="annoLog"></div>
+  </div>
+</section>
+
+<!-- ============================ 舆情 ============================ -->
+<section class="page" id="page-wechat">
+  <div class="card">
+    <h3>抓取公众号热文</h3>
+    <p class="desc">走微信读书「搜一搜」，比搜狗微信时效更新。不填关键词就按当前时间自动研判（盘前 / 午盘 / 复盘）。</p>
+    <div class="row">
+      <div class="field"><label>关键词（留空自动研判）</label><input type="text" id="wcKeyword" placeholder="如：A股午盘"></div>
+      <div class="field"><label>篇数</label><input type="number" id="wcCount" value="10" min="1" max="50"></div>
+      <div class="field"><label>输出目录</label><input type="text" id="wcDir"></div>
+      <button class="btn-primary" id="btnCrawl">开始抓取</button>
+    </div>
+    <div class="note">抓取会弹出浏览器窗口要求微信扫码登录（登录态存本地、之后自动复用），故始终走有头模式。</div>
+    <div id="wcSuggest" class="note"></div>
+  </div>
+
+  <div class="card">
+    <h3>已抓取文章</h3>
+    <div class="toolbar">
+      <button id="btnRefreshWc">刷新</button>
+      <button id="btnOpenWc">打开目录</button>
+      <span class="spacer"></span><span class="faint">点标题读正文</span>
+    </div>
+    <div id="wcList" class="filelist"><div class="empty">暂无文章</div></div>
+    <div id="wcPreview" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>任务日志</h3>
+    <div class="log" id="wcLog"></div>
+  </div>
+</section>
+
+<!-- ============================ 晨会 Report ============================ -->
+<section class="page" id="page-report">
+  <div class="card">
+    <h3>回测报告（主题 → 板块 → 个股）</h3>
+    <p class="desc">直接内嵌 <span class="mono">_analysis</span> 下的报告，三级都在里面点就行：
+      ① <b>主题总览</b>（16 主题 + KPI）→ ② <b>板块卡片</b>（点进板块看等权指数 vs 沪深300）→ ③ <b>板块内个股</b>（个股 vs 板块指数 vs 沪深300，带命中率与原话盒）。
+      面包屑的「← 返回」可逐级上翻。</p>
+    <div class="toolbar">
+      <select id="rpHtmlSel" style="min-width:260px"></select>
+      <button id="btnRpReload">重载</button>
+      <button id="btnRpOpenHtml">新窗口打开</button>
+      <button id="btnRpFull">全屏</button>
+      <span class="spacer"></span><span class="faint" id="rpHtmlInfo"></span>
+    </div>
+    <iframe id="rpFrame" class="rp-frame" title="晨会观点命中回测报告"></iframe>
+  </div>
+
+  <div class="grid2">
+  <div class="card" id="cardRpIngest">
+    <h3>触发晨会入库（复制提示词）</h3>
+    <p class="desc">点「生成 / 刷新」拼一条指令（会带上当前检测到的新晨会清单），复制后粘贴到 WorkBuddy 对话框执行即可：
+      它会加载 <span class="mono">C:\Users\<用户名>\.workbuddy\skills\morning-note-ingest</span> 这个 skill，
+      依次跑完 检测 → 转 txt → LLM 提取 → 并入总表 → 补代码行情 → 重建 <span class="mono">F观点命中回测_板块.html</span>。</p>
+    <div class="toolbar">
+      <button class="btn-primary" id="btnRpGenPrompt">生成 / 刷新提示词</button>
+      <button id="btnRpCopyPrompt">复制提示词</button>
+      <span class="spacer"></span><span class="faint" id="rpPromptInfo"></span>
+    </div>
+    <textarea id="rpPrompt" class="bridge-result" rows="16" readonly hidden
+      style="margin-top:10px;white-space:pre-wrap" spellcheck="false"
+      placeholder="点「生成 / 刷新提示词」后在此显示…"></textarea>
+  </div>
+
+  <div class="card">
+    <h3>晨会管线概览</h3>
+    <p class="desc">《晨会分享YYYYMMDD.docx》→ 转 txt → AI 按 schema 提取 → 并入总表 → 补代码行情 → 重建命中回测报告。
+      本页不直接跑管线，只负责生成一条能触发 <span class="mono">morning-note-ingest</span> skill 的指令。</p>
+    <div id="rpStatus" class="filelist"><div class="empty">加载中…</div></div>
+    <div class="toolbar">
+      <button id="btnRpRefresh">刷新</button>
+      <button id="btnRpOpenOut">打开 _analysis 目录</button>
+    </div>
+  </div>
+  </div>
+</section>
+
+<!-- ============================ 设置（合并） ============================ -->
+<section class="page" id="page-overview-settings">
+
+  <div class="card">
+    <h3>模型后端</h3>
+    <p class="desc">两种后端：<b>云端 API</b>直连任意 OpenAI 兼容平台（耗 token）；<b>WorkBuddy 桥接</b>完全不联网，把 prompt 交给 WorkBuddy 跑、把结果贴回，最省 token。主流厂商（DeepSeek / 智谱 / 通义 / Kimi / 商汤 / 火山…）都用 OpenAI 兼容协议，<b>切服务商 = 换接口地址 + 模型名 + Key</b> 三项。</p>
+    <div class="row">
+      <div class="field"><label>后端</label>
+        <select id="cfgBackend">
+          <option value="api">云端 API（OpenAI 兼容）</option>
+          <option value="workbuddy">WorkBuddy 桥接（不联网，交给 WorkBuddy 跑）</option>
+        </select>
+      </div>
+      <div class="field"><label>服务商预设</label>
+        <select id="cfgProvider"><option value="">自定义 / 手动填写</option></select>
+      </div>
+    </div>
+    <p class="desc" id="cfgProviderNote" style="display:none"></p>
+    <div class="row">
+      <div class="field"><label>接口地址</label><input type="text" id="cfgBase"></div>
+      <div class="field"><label>模型名</label><input type="text" id="cfgModel" placeholder="如 deepseek-chat"></div>
+    </div>
+    <div class="field" id="cfgKeyField"><label>API Key</label><input type="text" id="cfgKey" placeholder="留空表示不修改"></div>
+    <p class="desc" id="cfgWbHint" style="display:none;color:var(--ok-text)">桥接模式无需 Key、不联网。运行 AI 精读时，公告页「桥接」面板会列出待处理 prompt；复制到 WorkBuddy 运行、把 JSON 贴回即可。点「测试连接」会直接显示「桥接就绪」。</p>
+    <div class="row">
+      <div class="field"><label>温度</label><input type="number" id="cfgTemp" step="0.1" min="0" max="2"></div>
+      <div class="field"><label>超时（秒）</label><input type="number" id="cfgTimeout" min="30" max="900"></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn-primary" id="btnSaveCfg">保存</button>
+      <button id="btnTestLlm">测试连接</button>
+      <span id="llmTestResult"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>终端 <span class="badge" id="termBadge">空闲</span></h3>
+    <p class="desc">本机命令行窗口（仅 <span class="mono">127.0.0.1</span> 可访问），可直接跑
+      <span class="mono">pip</span> / <span class="mono">python</span> 等指令。
+      ⚠ 等同于在本机打开的命令行，请自行甄别，勿跑破坏性指令。少量高危指令（如
+      <span class="mono">rm -rf</span> / <span class="mono">format</span> / <span class="mono">shutdown</span>）会被拦截。</p>
+    <div class="row">
+      <input type="text" id="termInput" class="mono" style="flex:1"
+             placeholder="如：pip list  或  python -c &quot;print(1+1)&quot;" autocomplete="off" spellcheck="false">
+      <button class="btn-primary" id="btnTermRun">运行</button>
+      <button id="btnTermStop" style="display:none">停止</button>
+    </div>
+    <pre id="termOut" class="term-out"><span class="faint">输出会实时显示在这里…</span></pre>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>工作台</h3>
+      <p class="desc">三个项目共用一套运行环境。左边看状态，右边看最近跑过的任务。</p>
+      <div class="stat" id="ovStat">
+        <div><div class="k">Data 日期目录</div><div class="v" id="ovDataCount">–</div></div>
+        <div><div class="k">Anno 待处理公告</div><div class="v" id="ovAnnoCount">–</div></div>
+        <div><div class="k">Wechat 已抓文章</div><div class="v" id="ovWcCount">–</div></div>
+        <div><div class="k">依赖就绪</div><div class="v" id="ovDepCount">–</div></div>
+      </div>
+      <div id="ovNote"></div>
+    </div>
+    <div class="card">
+      <h3>最近任务</h3>
+      <div id="ovTasks" class="filelist"><div class="empty">暂无任务</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>运行环境</h3>
+    <p class="desc">平台会自动挑一个「依赖最全」的 Python 来跑脚本。也可以手动指定。</p>
+    <div class="field"><label>Python 解释器（留空自动探测）</label><input type="text" id="cfgPython"></div>
+    <div class="toolbar">
+      <button id="btnDetect">重新探测</button>
+      <button id="btnSaveCfg2">保存</button>
+    </div>
+    <div id="depList" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h3>配置文件位置</h3>
+    <div class="mono faint" id="cfgPath"></div>
+  </div>
+</section>
+
+</div>
+
+<!-- 通用确认弹窗（重新开始 等） -->
+<div class="modal-mask" id="modalMask" style="display:none">
+  <div class="modal">
+    <div class="modal-msg" id="modalMsg"></div>
+    <div class="modal-actions">
+      <button class="btn-sm" id="modalCancel">取消</button>
+      <button class="btn-sm primary" id="modalOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 目录浏览器（网页内导航，不依赖系统弹框） -->
+<div class="modal-mask" id="dirMask" style="display:none">
+  <div class="modal dirpick">
+    <div class="dp-head">
+      <span>选择目录</span>
+      <button class="dp-x" id="dpClose" title="关闭">×</button>
+    </div>
+    <div class="dp-body">
+      <div class="dp-rail" id="dpRail"></div>
+      <div class="dp-main">
+        <div class="dp-bar">
+          <button class="btn-sm" id="dpUp" title="上级目录">↑</button>
+          <input type="text" class="mono dp-addr" id="dpAddr"
+                 placeholder="输入路径回车跳转，如 C:/ 或 C:/Users">
+          <button class="btn-sm" id="dpGo">转到</button>
+        </div>
+        <div class="dp-list" id="dpList"></div>
+      </div>
+    </div>
+    <div class="dp-bottom">
+      <input type="text" class="mono" id="dpSel" placeholder="选中路径（可直接修改）">
+      <div class="dp-actions">
+        <button class="btn-sm" id="dpCancel">取消</button>
+        <button class="btn-sm primary" id="dpOk">选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

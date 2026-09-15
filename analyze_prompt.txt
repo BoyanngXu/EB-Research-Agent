@@ -1,0 +1,40 @@
+你是 EB 投研 Agent 平台（地址 http://127.0.0.1:8765）的操作员。下面是一份「一键分析」控制指令，请用你可用的工具（浏览器 / HTTP 请求 / 文件读取）自动驱动该平台，把公告目录里的 PDF 整理成《可交换债公告整理表》，落到输出目录。全程无需等我二次确认，按步骤推进即可。
+
+【输入】
+- 公告目录（PDF 所在）：C:/Users/<用户名>/Desktop/Anno
+- 输出目录（整理表落盘）：C:/Users/<用户名>/Desktop/EB-Agent/runtime/output
+- 精读模型：hy3
+
+【前置检查】
+1. GET http://127.0.0.1:8765/ ，确认平台在线（返回 200）；不在线就提示用户先启动平台。
+2. 打开「设置 → 模型后端」，确认是「WorkBuddy 桥接」。不是的话，调成 workbuddy（这样 AI 精读会把每份公告的 prompt 写进平台「桥接」面板，由你来读并执行）。
+
+【步骤 A · 转储 PDF】
+- POST /api/anno/dump  body: {"dir":"C:/Users/<用户名>/Desktop/Anno","clean":true}
+- 拿到 task_id 后，订阅 GET /api/tasks/<task_id>/stream 看日志，等到 status=done。
+- 转储完成后，GET /api/anno/txt?dir=C:/Users/<用户名>/Desktop/Anno 得到 files 列表，记下全部 txt 的【绝对路径】清单（共 N 份）。
+
+【步骤 B · AI 精读（桥接，由你执行）】
+- POST /api/anno/digest  body: {"files":[<步骤A 的全部 txt 绝对路径>],"model":"hy3","restart":true}
+  该接口会为每份公告在平台「桥接」面板生成一条待处理 prompt，并阻塞等待你回填结果。
+- 循环，直到 GET /api/bridge/pending 返回的 items 为空：
+  - 取 items[0]（当前待处理项）。若其 scanned=true，用 Read 工具按 images 字段里的绝对路径逐页读图识别文字；否则直接读 prompt 里的公告正文。
+  - 按平台 EB-Agent/tools/eb-anno-digest/SKILL.md 的【摘要写法】与【提交前自检清单】，把该份公告提炼成 9 字段 JSON：
+    公告日期 / 上市公司 / 可交换债 / 证券代码 / 标的股票 / 股票代码 / 换股价格 / 公告性质 / 内容摘要
+    （摘要主线 = EB 违约风险 + 财务状况，事件/要点式 130~360 字；定期报告顺序 = 财务 → 风险判断 → EB 条款，绝不可把发行规模/期限/票面顶在段首。）
+  - POST /api/bridge/submit  body: {"id": items[0].id, "content": <上面的 JSON 对象>}
+  - 提交后等约 1 秒再刷新 pending，继续下一条。
+- 每处理一份，在【执行日志】里打印进度条（用当前已处理/总数、当前文件耗时与预估剩余时间刷新）：
+  ╸━━━━━━━━━━━━━━ 0/1 [1.txt]
+  ━━━╸━━━━━━ 00:30/00:50 | 0:10:17 (当前任务已进行时间/当前任务预估剩余时间 | 总任务预估剩余时间)
+
+【步骤 C · 保存并生成整理表】
+- POST /api/anno/save  body: {"rows":[<步骤B 你提交的全部 JSON>],"dir":"C:/Users/<用户名>/Desktop/Anno"}
+  （把 rows 落到 C:/Users/<用户名>/Desktop/Anno/input.json）
+- POST /api/anno/build  body: {"dir":"C:/Users/<用户名>/Desktop/Anno","input":"C:/Users/<用户名>/Desktop/Anno/input.json","out":"C:/Users/<用户名>/Desktop/EB-Agent/runtime/output/公告整理.xlsx","strict":false}
+  订阅日志等到 status=done。
+- 若 build 报错，先确认 C:/Users/<用户名>/Desktop/Anno/input.json 已生成，再重试。
+
+【完成】
+- 确认 C:/Users/<用户名>/Desktop/EB-Agent/runtime/output/公告整理.xlsx 已生成（GET /api/files?path=C:/Users/<用户名>/Desktop/EB-Agent/runtime/output 能看到）。
+- 向用户汇报：共处理 N 份公告，成功 / 跳过（担保人财报等）/ 失败 各多少；整理表路径。

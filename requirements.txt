@@ -1,0 +1,10 @@
+# EB-Agent 核心依赖（平台本体 + 公告/舆情/晨会三条流水线）
+# 安装：  .venv\Scripts\python.exe -m pip install -r requirements.txt
+openpyxl>=3.1          # Excel 读写：重建总表、生成公告整理表
+requests>=2.31         # 网络请求：模型 API、抓公众号正文
+pdfplumber>=0.11       # PDF 文本提取（公告转储首选）
+pypdfium2>=4.30        # 扫描件 PDF 渲染成图片
+pypdf>=4.3             # PDF 文本提取兜底（无 pdfplumber 时用）
+python-docx>=1.1       # Word 读写：公众号文章导出 docx
+beautifulsoup4>=4.12   # 网页解析
+lxml>=5.2              # HTML 解析器（配合 bs4）
