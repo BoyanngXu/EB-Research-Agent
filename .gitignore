@@ -37,3 +37,9 @@ tools/eb-report/golden_example.json
 # 微信抓取类脚本（涉及平台条款，不随仓库发布，本地保留）
 tools/wxgroup/
 tools/wechat-gzh-crawler/
+
+# 含真实行情数据的"模板"（实为数据快照，含中证估值等授权数据，不公开；本地保留）
+tools/eb-data-rebuild/模板/
+
+# 含真实公告精读成品（真实标的/财务数字），不公开；本地保留
+tools/eb-anno-digest/example_input.json
