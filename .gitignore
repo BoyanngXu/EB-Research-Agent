@@ -33,3 +33,7 @@ dist/
 
 # 含真实晨会研究样本，不入库（本地保留即可）
 tools/eb-report/golden_example.json
+
+# 微信抓取类脚本（涉及平台条款，不随仓库发布，本地保留）
+tools/wxgroup/
+tools/wechat-gzh-crawler/
