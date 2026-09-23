@@ -514,8 +514,10 @@ def h_wechat_crawl(req):
     body = req.body or {}
     kw, period = wechat.suggest_keyword()
     # 微信读书登录必须扫码，无头模式无法完成 → 全部走有头模式（headed=False）。
+    # summarize_local=False → 联网优先：先调 LLM 生成总结，失败/限流回退本地速览。
+    # （面试演示副本 config 无 token，仍走 summarize_local=True 强制本地，行为不变）
     t = wechat.crawl(count=body.get("count"), keyword=body.get("keyword"),
-                     out_dir=body.get("dir"), headless=False)
+                     out_dir=body.get("dir"), headless=False, summarize_local=False)
     return _ok(task=t.snapshot(with_log=False), suggested=kw, period=period)
 
 
@@ -594,6 +596,48 @@ def h_assistant(req):
     if not isinstance(res, dict):
         return _err("助手返回异常")
     return res
+
+
+def h_assistant_followup(req):
+    """GET /api/assistant/followup?task=<tid>：取回「补抓完成后自动补全的答案」。
+
+    「先补后答」/后置复判补抓是异步长任务，问答会先返回进度卡；抓完 on_done 会做一次
+    二次生成写进 task.result['followup_qa']。前端在进度卡上轮询本接口：
+      - 未完成 → {ok, pending:true}
+      -  完成 → {ok, done:true, qa:{...}}（结构化答案，直接渲染）
+    """
+    tid = (req.q("task") or req.q("tid") or "").strip()
+    if not tid:
+        return _err("缺少 task id")
+    try:
+        t = tasks.get(tid)
+        if not t:
+            try:
+                m = tasks.read_meta(tid)
+            except ValueError as e:
+                return _err(str(e))
+            if not m:
+                return _err("任务不存在")
+            fu = (m.get("result") or {}).get("followup_qa")
+            if fu:
+                return _ok(done=True, qa=fu, task=task_status_of(m))
+            return _ok(pending=True, status=m.get("status"))
+        snap = t.snapshot(with_log=False)
+        fu = (snap.get("result") or {}).get("followup_qa")
+        if fu:
+            return _ok(done=True, qa=fu)
+        if t.status in ("done", "failed", "stopped"):
+            return _ok(done=True, qa=None, status=t.status,
+                       message="补抓已结束，但未能生成补全答案；可直接重新提问。")
+        return _ok(pending=True, status=t.status)
+    except Exception as e:
+        return _err("读取补答结果失败：%s" % e)
+
+
+def task_status_of(meta):
+    """从落盘 meta 里摘一个状态字段（供 followup 回退分支用）。"""
+    s = (meta or {}).get("status")
+    return {"status": s}
 
 
 def h_assistant_context(req):
@@ -723,6 +767,7 @@ ROUTES = [
     ("GET", re.compile(r"^/report_view/(?P<rel>.+)$"), h_report_asset),
 
     ("POST", re.compile(r"^/api/assistant$"), h_assistant),
+    ("GET", re.compile(r"^/api/assistant/followup$"), h_assistant_followup),
     ("GET", re.compile(r"^/api/assistant/context$"), h_assistant_context),
     ("GET", re.compile(r"^/api/assistant/sessions$"), h_assistant_sessions),
     ("GET", re.compile(r"^/api/assistant/session$"), h_assistant_session),

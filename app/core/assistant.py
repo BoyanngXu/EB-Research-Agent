@@ -13,6 +13,7 @@
 """
 import os
 import re
+import threading
 import time
 
 from . import config, datareader, llm, memory, retrieval, tasks
@@ -258,12 +259,27 @@ def _derive_wechat_keyword(msg):
     if "复盘" in m:
         return "今日A股复盘"
     topic = _extract_topic(m)
+    topic = _clean_crawl_keyword(topic)
     if topic and 2 <= len(topic) <= 16:
         return topic
     try:
         return wechat.suggest_keyword()[0]
     except Exception:
         return "A股午盘"
+
+
+# 抓取关键词里必须剥掉的问句尾巴/比较词，否则会把「谁占优」这类整句当关键词去搜
+_KW_TAIL = ("谁占优", "谁更强", "谁更强一些", "谁更", "哪个更", "孰优孰劣", "孰优", "对比",
+           "比较", "排名", "怎么样", "如何", "怎么看", "是什么", "有哪些")
+
+
+def _clean_crawl_keyword(topic):
+    """把抽出的领域词清洗成可用的抓取关键词（去掉问句尾巴与比较词）。"""
+    s = (topic or "").strip()
+    for t in _KW_TAIL:
+        s = s.replace(t, "")
+    s = re.sub(r"[\s？?！!。，,.、~～\-—:：]+$", "", s)
+    return s.strip()
 
 
 def _has_relevant_wechat(keyword, limit=15):
@@ -450,6 +466,75 @@ def _llm_override():
     return ov
 
 
+# ---------------------------------------------------------------- 检索充分度复判
+# CRAG/Self-RAG 简化版：生成后复判「答案是否匮乏」，匮乏则补取一次再答（最多一轮）。
+# 判定为纯规则（零额外 LLM 调用，不撞限流），阈值/开关可在 config.assistant 里调。
+_EMPTY_PHRASES = ("未明确", "没找到", "未找到", "资料里没有", "现有资料未", "未给出",
+                  "无法判断", "不足以", "暂无", "不包含", "缺乏", "无从", "没有相关",
+                  "未提及", "资料不足", "信息不足", "暂未", "未收录")
+# 对比/排名类意图：这类问题要求「谁占优/排名/对比」必须有结构化支撑，更容易判匮乏
+_COMPARE_MARKERS = ("谁占优", "谁更", "对比", "比较", "排名", "排序", "哪个更", "孰优",
+                    "优劣", "排行", "top", "前几", "哪家", "谁强")
+
+
+def _sufficiency(question, answer, snips, cfg=None):
+    """复判回答是否「资料不足以支撑」。返回 (ok:bool, reason:str)。
+
+    ok=False 表示答案匮乏、值得补取一次。纯规则、零联网：
+    - 有明显回避措辞（"未明确/没找到/资料不足"…）→ 不足
+    - 检索片段过少（低于 min_snippets）→ 不足
+    - 对比/排名类问题但答案过短/无结构化支撑 → 不足
+    """
+    a = cfg or {}
+    if not a.get("sufficiency_check", True):
+        return True, "复判已关闭"
+    txt = (answer or "").strip()
+    if not txt:
+        return False, "答案为空"
+    n = len(snips or [])
+    min_sn = int(a.get("min_snippets", 3) or 3)
+    # 1) 回避措辞：出现即判不足
+    hit = next((p for p in _EMPTY_PHRASES if p in txt), None)
+    if hit:
+        return False, "答案出现回避措辞「%s」且仅 %d 条片段" % (hit, n)
+    # 2) 片段过少
+    if n < min_sn:
+        return False, "仅检索到 %d 条片段（低于阈值 %d）" % (n, min_sn)
+    # 3) 对比/排名类：要"谁占优"却没成表/没排名结构 → 不足
+    low_q = (question or "").lower()
+    if any(k in low_q for k in _COMPARE_MARKERS):
+        has_struct = ("|" in txt) or ("：" in txt and "\n" in txt) or \
+                     any(c in txt for c in ("第一", "其次", "排名", "居首", "①", "1."))
+        # 有结构化排名即认为够；否则看长度，过短才判不足（避免误伤"简短但有结论"的回答）
+        if not has_struct and len(txt) < 60:
+            return False, "对比类问题但答案缺乏结构化排名/对比"
+    return True, ""
+
+
+def _retrieval_sufficiency(question, snips, cfg=None):
+    """**生成前**判「检索到的资料够不够」，不够就别先生成那个瑕疵答案（先补后答）。
+
+    与 `_sufficiency`（生成后复判、看答案措辞）不同，这里只看检索侧证据：
+    - 片段过少（低于 min_snippets）→ 不足
+    - 对比/排名类问题（谁占优/对比/排名…）但没有任何可支撑"对比"的高分片段 → 不足
+    返回 (ok:bool, reason:str)。纯本地、零 LLM 调用。
+    """
+    a = cfg or {}
+    if not a.get("pre_check", True):
+        return True, "前置判定已关闭"
+    n = len(snips or [])
+    min_sn = int(a.get("min_snippets", 3) or 3)
+    if n < min_sn:
+        return False, "仅检索到 %d 条片段（低于阈值 %d）" % (n, min_sn)
+    low_q = (question or "").lower()
+    if any(k in low_q for k in _COMPARE_MARKERS):
+        # 对比类问题：看是否有"像样"的片段（有实质正文而非仅标题/元信息）
+        rich = [s for s in (snips or []) if len((s.get("text") or "").strip()) >= 120]
+        if len(rich) < 2:
+            return False, "对比类问题但可支撑对比的资料片段不足（%d 条有实质正文）" % len(rich)
+    return True, ""
+
+
 def _build_context(snippets):
     if not snippets:
         return "（没有检索到任何资料）"
@@ -570,30 +655,57 @@ def _clean_reason(reason):
     return r
 
 
-def _summarize_snips(snips, limit=8):
-    """把检索到的本地资料压缩成一段可读摘要（限前 N 条），供模型不可用时先给用户看。
+_FIELD_RE = re.compile(r"【([^】]{1,12})】\s*([\s\S]*?)(?=【|$)")
 
-    排版目标：每条**加粗标题**独立成段（段间空行），行内密集字段（｜分隔）拆成竖排，
-    命中率排行等子列表单独换行，整体更清爽。
+
+def _extract_fields(text):
+    """从结构化片段（如舆情记忆精华的固定七节格式）里抽 【节】→内容。
+
+    返回 [(label, value)]，只保留非空且非「原文未提及」的字段。纯本地、不依赖 LLM，
+    用于限流降级时把结构化源直接拆成可读字段，而不是把整段原文甩给用户。
     """
-    blocks = []
-    for i, s in enumerate(snips[:limit], 1):
-        label = retrieval.SOURCE_LABELS.get(s.get("source"), s.get("source", ""))
-        title = s.get("title") or s.get("ref") or ""
-        text = (s.get("text") or "").strip().replace("\r", "")
-        # 行内密集字段拆成竖排，提升可读性
-        text = text.replace("｜", "｜\n    ")
-        # 子列表（个股/板块命中率排行）单独空一行起头
-        text = text.replace("个股命中率排行（同率按样本数降序）",
-                            "\n个股命中率排行（同率按样本数降序）")
-        text = text.replace("板块命中率 Top", "\n板块命中率 Top")
-        # 清理：｜后若紧跟空行则压掉；连续空行最多保留一段
-        text = re.sub(r"｜\s*\n\s*\n", "｜\n    ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        text = text.strip()
-        text = text[:500] + ("…" if len(text) > 500 else "")
-        blocks.append("**%d. [%s] %s**\n%s" % (i, label, title, text))
-    return "\n\n".join(blocks) if blocks else "（未检索到本地相关资料）"
+    out = []
+    for m in _FIELD_RE.finditer(text or ""):
+        k, v = m.group(1).strip(), m.group(2).strip()
+        if not v or v == "原文未提及":
+            continue
+        out.append((k, v[:320] + ("…" if len(v) > 320 else "")))
+    return out
+
+
+def _local_intel_card(snips, reason):
+    """限流降级（纯本地、不联网）的情报卡：把已检索到的片段按源分组，对结构化源抽字段，
+    拼成一份用户可直接阅读的答案。完全不调用 LLM——LLM 挂了也能用。
+
+    桥接 prompt 由调用方另行提供（作为「可选升级」），本函数只负责本地可读内容。
+    """
+    if not snips:
+        return ("⚠ 模型暂时不可用（%s），且未检索到本地相关资料。\n"
+                "可先「转储公告 PDF」或「重建数据总表」让我有东西可查。" % _clean_reason(reason))
+    # 按源分组（组内保持 score 降序）
+    groups = {}
+    for s in sorted(snips, key=lambda x: -x.get("score", 0)):
+        groups.setdefault(s.get("source") or "unknown", []).append(s)
+    parts = []
+    for src, items in groups.items():
+        label = retrieval.SOURCE_LABELS.get(src, src)
+        lines = ["### 📂 %s · %d 条" % (label, len(items))]
+        for i, s in enumerate(items, 1):
+            title = s.get("title") or s.get("ref") or "（无标题）"
+            text = (s.get("text") or "").strip().replace("\r", "")
+            fields = _extract_fields(text)
+            if fields:                       # 结构化源（如舆情记忆精华）：抽字段竖排
+                body = "\n".join("· **%s**：%s" % (k, v) for k, v in fields)
+            else:                           # 非结构化源：截取前文，避免整段甩给用户
+                body = text[:400] + ("…" if len(text) > 400 else "")
+            lines.append("**%d. %s**\n%s" % (i, title, body))
+        parts.append("\n".join(lines))
+    header = ("⚠ 模型暂时不可用（%s），已为你定位以下**本地资料**（纯本地检索，无需联网）：\n\n"
+              % _clean_reason(reason))
+    card = header + "\n\n".join(parts)
+    card += ("\n\n— 以上为本地片段直接拼装，未经 AI 归纳。如需精确综合回答，"
+             "可复制下方「桥接 prompt」提交在线 AI 平台。")
+    return card
 
 
 def _bridge_qa(question, snips, ov):
@@ -622,16 +734,14 @@ def _bridge_qa(question, snips, ov):
 
 
 def _degraded_to_bridge(question, snips, reason, ov, hint=""):
-    """429/配额等系统侧抖动：不换模型重试，直接产出桥接 prompt（对话内可复制提交给 WorkBuddy），
-    并附本地检索资料摘要，用户无需等待即可先看到资料。
+    """429/配额等系统侧抖动：不换模型重试。
+    默认返回【纯本地情报卡】（按源分组 + 字段抽取，不联网即可读）；
+    同时保留桥接 prompt（prompt_text）作为「可选升级」——想拿 AI 归纳回答就复制提交在线平台。
     """
     bid, prompt_text, sources = _make_bridge_qa(question, snips, ov, "首页对话助手问答(限流降级)")
-    summary = _summarize_snips(snips)
-    answer = ("【模型暂时不可用（%s），以下是本地相关内容可供参考：】\n\n"
-              "【本地相关资料摘要】\n%s") % (_clean_reason(reason), summary)
-    # 桥接流程的下一步动作（覆盖旧「隔 10~30 秒重试」提示，模型不可用时应引导去在线 AI 平台归纳）
-    answer += ("\n\n【点下方「复制 prompt」提交给在线AI工作平台可获得归纳回答，"
-               "把返回的 JSON/文本贴回可使回答更精确。】")
+    # 默认给「纯本地情报卡」：按源分组 + 字段抽取，不联网即可读；
+    # 桥接 prompt 仍保留（prompt_text）作为「可选升级」——想拿 AI 归纳就复制提交在线平台。
+    answer = _local_intel_card(snips, reason)
     return {
         "kind": "qa",
         "mode": "bridge",
@@ -651,14 +761,60 @@ def _degraded_to_bridge(question, snips, reason, ov, hint=""):
     }
 
 
+# ---------------------------------------------------------------- 后台补答登记簿
+# 「先补后答」/「生成后复判」补抓是异步长任务（几分钟）。任务跑完时 on_done 钩子会做一次
+# 二次生成，把补全答案写进 task.result["followup_qa"]；前端在进度卡上调用
+# /api/assistant/followup?task=<tid> 轮询取回（无需刷新页面）。登记簿只存内存 +
+# task.result（tasks 有界淘汰），无需落盘。
+_FOLLOWUP = {}          # task_id -> {"question":..., "session":...}
+_FOLLOWUP_LOCK = threading.Lock()
+_FOLLOWUP_LIMIT = 40
+
+
+def _register_followup(tid, question, session):
+    """登记「某抓取任务完成后要做二次生成」，供 on_done 钩子回查问题与会话。"""
+    if not tid:
+        return
+    with _FOLLOWUP_LOCK:
+        _FOLLOWUP[tid] = {"question": question, "session": session}
+        while len(_FOLLOWUP) > _FOLLOWUP_LIMIT:
+            _FOLLOWUP.pop(next(iter(_FOLLOWUP)), None)
+
+
+def _pop_followup(tid):
+    with _FOLLOWUP_LOCK:
+        return _FOLLOWUP.pop(tid, None)
+
+
+def _make_followup_hook(question, session, a):
+    """构造传给 wechat.crawl 的 on_done：抓取一结束就用新资料再生成一次，
+    结果写进 task.result['followup_qa']（"先补后答"取不到的那部分答案在这里补齐）。"""
+    def _hook(task):
+        try:
+            out = _generate_only(question, session, a)
+            out.pop("_snips", None)
+            out.pop("_plan", None)
+            task.result = dict(task.result or {})
+            task.result["followup_qa"] = out
+            task.emit("补取完成，已用新资料重新生成答案", "info")
+        except Exception as e:
+            task.emit("补取后重新生成失败：%s" % e, "warn")
+        return task.result
+    return _hook
+
+
 def rag_answer(question, session=None, history=None):
-    """Agentic RAG 问答：规划 → 检索 → 生成（失败降级本地）。"""
+    """Agentic RAG 问答：规划 → 检索 → 生成（失败降级本地）。
+
+    流程（CRAG/Self-RAG 简化版 + 先补后答）：
+      1. 规划 → 检索
+      2. **前置判定**：检索侧证据不足（片段少 / 对比类缺支撑）→ 先补抓再生成
+         （补抓完成则用新资料生成；若仍未完成，则立刻返回「补抓中」进度卡，**不生成瑕疵答案**）
+      3. 生成
+      4. **后置复判**：答案匮乏 → 再补取一次（最多一轮）
+    """
     a, z, _ = _cfg_assistant()
     t0 = time.time()
-    plan_obj = retrieval.plan(question)
-    g = retrieval.gather(question, plan_obj, session=session)
-    snips = g["snippets"]
-
     if history is None:
         hist_recs = (memory.read(session, limit=40) if session else [])
         hist = []
@@ -668,42 +824,226 @@ def rag_answer(question, session=None, history=None):
     else:
         hist = history
 
+    ov = _llm_override()
+    do_retry = bool(a.get("sufficiency_retry", True))
+    do_pre = bool(a.get("pre_check", True))
+
+    def _attempt(q, pre_snips=None):
+        """跑一轮：规划 → 检索 → 生成（或降级）。返回 out dict。
+
+        pre_snips 非空时跳过检索，直接用给定片段生成（先补后答复用第一次检索结果）。
+        """
+        if pre_snips is not None:
+            plan_obj = {"sources": [], "signals": []}
+            used = sorted({s.get("source") for s in pre_snips})
+            g = {"snippets": pre_snips, "used": used,
+                 "used_labels": [retrieval.SOURCE_LABELS.get(u, u) for u in used]}
+        else:
+            plan_obj = retrieval.plan(q)
+            g = retrieval.gather(q, plan_obj, session=session)
+        snips = g["snippets"]
+        ctx = _build_context(snips)
+        user_msg = "【用户问题】%s\n\n【检索到的资料】\n%s" % (q, ctx)
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + hist + \
+                   [{"role": "user", "content": user_msg}]
+        if ov.get("backend") == "workbuddy":
+            o = _bridge_qa(q, snips, ov)
+            o["_snips"], o["_plan"] = snips, plan_obj
+            return o
+        r = llm.chat(messages, override=ov,
+                     timeout=min(int(a.get("timeout", 120) or 120), 60))
+        o = {
+            "kind": "qa",
+            "sources": _group_sources(snips),
+            "used": g["used"],
+            "used_labels": g["used_labels"],
+            "signals": plan_obj.get("signals") or [],
+            "retrieved": len(snips),
+            "elapsed": round(time.time() - t0, 2),
+        }
+        if r.get("ok"):
+            o.update({"answer": (r.get("content") or "").strip(), "mode": "llm",
+                      "model": r.get("model", ""), "note": ""})
+        else:
+            reason = r.get("message") or r.get("error") or "未知原因"
+            if r.get("kind") == "quota" or "429" in str(reason):
+                deg = _degraded_to_bridge(q, snips, reason, ov, r.get("hint", ""))
+                o.update(deg)
+            else:
+                deg = _degraded_bridge(q, snips, reason)
+                o.update({"answer": deg["text"], "mode": "local", "model": "",
+                          "note": reason, "hint": r.get("hint", ""), "local_paths": deg["paths"]})
+        o["_snips"], o["_plan"] = snips, plan_obj
+        return o
+
+    # —— 步骤 1：先检索一次（供前置判定与生成共用，避免重复检索）
+    plan_obj = retrieval.plan(question)
+    g0 = retrieval.gather(question, plan_obj, session=session)
+    snips0 = g0["snippets"]
+
+    # —— 步骤 2：前置判定（先补后答）——检索侧证据不足就先补抓，**不生成瑕疵答案**。
+    # 只有「舆情类 + 有登录态」才可能补抓；其余不足情况直接进入正常生成。
+    if do_pre and ov.get("backend") != "workbuddy":
+        p_ok, p_why = _retrieval_sufficiency(question, snips0, a)
+        if not p_ok:
+            crawl = None
+            try:
+                crawl = _supplement_and_retry(question, session, a)
+            except Exception:
+                crawl = None
+            if crawl and crawl.get("added", 0) > 0:
+                # 抓完了且有新增 → 用新资料直接生成（一步到位，用户看到的就是补全答案）
+                snips0 = (retrieval.gather(question, plan_obj, session=session)
+                          .get("snippets") or snips0)
+                out = _attempt(question, pre_snips=snips0)
+                out["sufficiency"] = {"ok": True, "reason": p_why, "pre_supplied": True,
+                                      "crawl": crawl}
+                out["signals"] = list(out.get("signals") or []) + \
+                                 ["前置判定：%s → 已先补取（%s，+%d 篇）再作答"
+                                  % (p_why, crawl.get("keyword", ""), crawl.get("added", 0))]
+                out.pop("_snips", None)
+                out.pop("_plan", None)
+                return out
+            if crawl and crawl.get("status") == "running":
+                # 抓取尚未完成 → **返回进度卡，不回显任何瑕疵答案**；完成经 SSE 自动补答
+                tid = (crawl.get("task") or {}).get("id") or ""
+                _register_followup(tid, question, session)
+                return {
+                    "kind": "qa", "mode": "supplementing",
+                    "answer": "", "sources": _group_sources(snips0),
+                    "used": g0.get("used"), "used_labels": g0.get("used_labels"),
+                    "signals": ["前置判定：%s → 正在补取（%s），完成后自动补全答案"
+                                % (p_why, crawl.get("keyword", ""))],
+                    "retrieved": len(snips0), "elapsed": round(time.time() - t0, 2),
+                    "sufficiency": {"ok": False, "reason": p_why, "supplementing": True,
+                                    "crawl": crawl},
+                    "crawl_task": tid, "keyword": crawl.get("keyword", ""),
+                    "model": "", "note": "",
+                }
+            # 补不了（无登录态 / 非舆情类）→ 落回正常生成，由后置复判兜底
+            snips0 = (retrieval.gather(question, plan_obj, session=session)
+                      .get("snippets") or snips0)
+
+    out = _attempt(question, pre_snips=snips0)
+
+    # —— 步骤 3：后置复判闭环（最多补取 1 轮）：答案匮乏 → 再补取一次并重答。
+    # 仅对 LLM 正常作答的结果复判；降级/桥接结果不做（本来就没走通模型）。
+    if do_retry and out.get("mode") == "llm":
+        ok, why = _sufficiency(question, out.get("answer"), out.get("_snips"), a)
+        if not ok:
+            out["sufficiency"] = {"ok": False, "reason": why, "retried": False}
+            out["signals"] = list(out.get("signals") or []) + ["复判：%s → 尝试补取" % why]
+            try:
+                crawled = _supplement_and_retry(question, session, a)
+            except Exception as e:
+                crawled = None
+                out["signals"].append("补取失败：%s" % e)
+            if crawled and crawled.get("added", 0) > 0:
+                # 抓取已完成且有新增 → 立刻用新资料重答
+                out2 = _attempt(question)
+                out2["sufficiency"] = {"ok": True, "reason": why, "retried": True,
+                                       "crawl": crawled}
+                out2["signals"] = list(out2.get("signals") or []) + \
+                                  ["复判不足 → 已补取（%s，+%d 篇）并重答"
+                                   % (crawled.get("keyword", ""), crawled.get("added", 0))]
+                out = out2
+            elif crawled and crawled.get("status") == "running":
+                # 抓取仍在跑 → **改用进度卡**（不把这道复判出的瑕疵答案当最终结果给用户），
+                # 抓完由 on_done 二次生成、前端经 SSE 自动补全。
+                tid = (crawled.get("task") or {}).get("id") or ""
+                _register_followup(tid, question, session)
+                out = {
+                    "kind": "qa", "mode": "supplementing",
+                    "answer": "", "sources": _group_sources(out.get("_snips") or []),
+                    "used": out.get("used"), "used_labels": out.get("used_labels"),
+                    "signals": list(out.get("signals") or []) +
+                               ["复判不足 → 正在补取（%s），完成后自动补全答案"
+                                % crawled.get("keyword", "")],
+                    "retrieved": out.get("retrieved"), "elapsed": round(time.time() - t0, 2),
+                    "sufficiency": {"ok": False, "reason": why, "supplementing": True,
+                                    "crawl": crawled},
+                    "crawl_task": tid, "keyword": crawled.get("keyword", ""),
+                    "model": "", "note": "",
+                }
+            else:
+                out["sufficiency"] = {"ok": False, "reason": why, "retried": False}
+        else:
+            out["sufficiency"] = {"ok": True, "reason": why, "retried": False}
+    out.pop("_snips", None)
+    out.pop("_plan", None)
+    return out
+
+
+def _generate_only(question, session, a):
+    """只做「检索 → 生成」一步（不补取、不复判），供后台补答钩子复用。"""
+    ov = _llm_override()
+    plan_obj = retrieval.plan(question)
+    g = retrieval.gather(question, plan_obj, session=session)
+    snips = g["snippets"]
     ctx = _build_context(snips)
     user_msg = "【用户问题】%s\n\n【检索到的资料】\n%s" % (question, ctx)
+    hist_recs = (memory.read(session, limit=40) if session else [])
+    hist = []
+    for r in hist_recs[-(int(a.get("max_history", 12)) * 2):]:
+        hist.append({"role": "user" if r.get("role") == "user" else "assistant",
+                     "content": (r.get("text") or "")[:1200]})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + hist + \
                [{"role": "user", "content": user_msg}]
-
-    ov = _llm_override()
-    if ov.get("backend") == "workbuddy":
-        # 桥接模式不阻塞等待真人回填：直接把「检索片段 + 问题」写成桥接 prompt 并即时返回提示，
-        # 用户在 WorkBuddy 侧运行后把结果贴回即可。否则首页问答会卡死 1800s 表现为「无响应」。
-        return _bridge_qa(question, snips, ov)
-    # 云端直连：给一个偏短的超时上限（RAG 答案本就短），避免网络不可达时前端一直转圈。
-    r = llm.chat(messages, override=ov,
-                 timeout=min(int(a.get("timeout", 120) or 120), 60))
-    out = {
-        "kind": "qa",
-        "sources": _group_sources(snips),
-        "used": g["used"],
-        "used_labels": g["used_labels"],
-        "signals": plan_obj.get("signals") or [],
-        "retrieved": len(snips),
-        "elapsed": round(time.time() - t0, 2),
-    }
+    o = {"kind": "qa", "sources": _group_sources(snips), "used": g.get("used"),
+         "used_labels": g.get("used_labels"), "signals": list(plan_obj.get("signals") or []),
+         "retrieved": len(snips), "elapsed": 0, "_snips": snips, "_plan": plan_obj}
+    r = llm.chat(messages, override=ov, timeout=min(int(a.get("timeout", 120) or 120), 60))
     if r.get("ok"):
-        out.update({"answer": (r.get("content") or "").strip(), "mode": "llm",
-                    "model": r.get("model", ""), "note": ""})
+        o.update({"answer": (r.get("content") or "").strip(), "mode": "llm",
+                  "model": r.get("model", ""), "note": ""})
     else:
         reason = r.get("message") or r.get("error") or "未知原因"
-        if r.get("kind") == "quota" or "429" in str(reason):
-            # 429/配额：系统侧抖动，不换模型重试；直接桥接 + 本地总结
-            deg = _degraded_to_bridge(question, snips, reason, ov, r.get("hint", ""))
-            out.update(deg)
-        else:
-            deg = _degraded_bridge(question, snips, reason)
-            out.update({"answer": deg["text"], "mode": "local", "model": "",
-                        "note": reason, "hint": r.get("hint", ""), "local_paths": deg["paths"]})
-    return out
+        deg = _degraded_bridge(question, snips, reason)
+        o.update({"answer": deg["text"], "mode": "local", "model": "",
+                  "note": reason, "local_paths": deg["paths"]})
+    return o
+
+
+def _supplement_and_retry(question, session, a):
+    """复判判不足后，补取一次舆情资料。返回 dict（含 keyword/added/status）或 None。
+
+    约束（避免打断用户）：
+    - **只用无头模式**：有登录态才跑，没有则直接放弃（不弹扫码窗口卡住问答）。
+    - 只补「舆情类」问题：推导出关键词才抓；纯本地问题（公告/数据）不抓公众号。
+    - **有界等待**（sufficiency_wait，默认 45s）：抓取通常要几分钟，超时就**不阻塞问答**，
+      返回 status='running'——本次答案照常返回（标「抓取中」），用户稍后再问即可命中新资料。
+    """
+    if not (a.get("sufficiency_crawl", True)):
+        return None
+    kw = _derive_wechat_keyword(question)
+    if not kw:
+        return None
+    # 无登录态就别抓：无头会直接失败，非无头会弹码卡死
+    try:
+        from ..projects import wechat as _wx
+        st = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "tools", "wechat-gzh-crawler", "login_state.json")
+        if not os.path.isfile(st):
+            return None
+        before = len((_wx.list_articles() or {}).get("files") or [])
+        # 注入 on_done：抓完即用新资料再生成一次，写进 task.result['followup_qa']，
+        # 供前端在进度卡上轮询取回（「先补后答」/后置复判都能靠它把答案补全）。
+        t = _wx.crawl(count=int(a.get("sufficiency_count", 6) or 6), keyword=kw,
+                      headless=True, on_done=_make_followup_hook(question, session, a))
+        deadline = time.time() + int(a.get("sufficiency_wait", 45) or 45)
+        status = "running"
+        while time.time() < deadline:
+            snap = t.snapshot(with_log=False) if hasattr(t, "snapshot") else {}
+            if snap.get("status") in ("done", "error", "stopped", "failed"):
+                status = snap.get("status")
+                break
+            time.sleep(1.0)
+        after = len((_wx.list_articles() or {}).get("files") or [])
+        added = max(0, after - before)
+        return {"keyword": kw, "added": added, "status": status,
+                "task": (t.snapshot(with_log=False) if hasattr(t, "snapshot") else {})}
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- 统一入口

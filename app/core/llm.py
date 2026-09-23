@@ -257,9 +257,43 @@ def _official_message(body):
         return ""
 
 
+# 智谱 GLM 的业务错误码：它不用 HTTP 状态码区分限流，而是把 code 放在返回体里。
+# 不认识这些码，就会把「过载」也误判成限流、把「欠费」当成临时抖动。
+_ZHIPU_CODES = {
+    "1113": ("quota", "账户欠费或余额不足", "去智谱控制台充值，或改用免费模型 / 兜底厂商。"),
+    "1302": ("quota", "达到账户速率限制（RPM / 并发）", "稍等 10~30 秒重试；配置了兜底厂商会自动换过去。"),
+    "1305": ("server", "智谱平台侧过载", "平台临时过载，重试通常能过（会被当作可重试错误换下一个候选）。"),
+    "1308": ("quota", "达到周期使用上限", "本周期额度已用尽，等下个周期或换厂商。"),
+    "1310": ("quota", "达到周期使用上限", "本周期额度已用尽，等下个周期或换厂商。"),
+}
+
+
+def _biz_code(body):
+    """从返回体里取业务错误码（智谱等平台用 code 字段）。取不到返回空串。"""
+    try:
+        d = json.loads(body or "")
+    except Exception:
+        return ""
+    if not isinstance(d, dict):
+        return ""
+    err = d.get("error")
+    if isinstance(err, dict):
+        c = err.get("code")
+        if c not in (None, ""):
+            return str(c)
+    c = d.get("code")
+    return "" if c in (None, "") else str(c)
+
+
 def _classify(err, status=None, body=""):
     """把异常/状态码翻译成结构化错误，kind 决定前端怎么提示。"""
     official = _official_message(body)
+    code = _biz_code(body)
+    if code in _ZHIPU_CODES:
+        kind, what, hint = _ZHIPU_CODES[code]
+        return {"kind": kind, "status": status, "code": code,
+                "message": "%s（业务码 %s）。%s" % (what, code, official),
+                "hint": hint}
 
     if status == 401 or status == 403:
         return {"kind": "auth", "status": status,
@@ -356,13 +390,63 @@ def _read_body(e):
         return ""
 
 
-def _pick_models(model=None, z=None):
+def _pick_candidates(model=None, z=None):
+    """构建有序候选链，每个候选自带完整连接信息（支持**跨厂商**兜底）。
+
+    顺序：
+      ① 主 provider 的 [请求模型, *fallback_models]（同一 base_url/key，换模型名）
+      ② fallback_providers 里每个厂商的模型（不同 base_url/key，换**厂商**）
+
+    为什么需要跨厂商：同一 provider 共用同一 Key，429 限流时换模型名毫无意义
+    （还会一起被限）；只有换到**另一家**的 Key 才可能顶上去。所以 quota 错误
+    只在「后面存在不同 base_url 的候选」时才继续，否则立即返回（见 _should_advance）。
+
+    候选结构：{"name","backend","base_url","api_key","env_key","model"}
+    """
     z = z or _cfg()
-    chain = []
+    cands = []
+
+    def _add(base_url, api_key, env_key, backend, m, name):
+        if not m:
+            return
+        if not api_key and env_key:
+            api_key = os.environ.get(env_key, "")
+        if any(c["base_url"] == base_url and c["model"] == m for c in cands):
+            return                       # 去重
+        cands.append({"name": name, "backend": backend or "api",
+                      "base_url": base_url, "api_key": api_key,
+                      "env_key": env_key, "model": m})
+
+    # ① 主 provider
     for m in [model or z.get("model")] + list(z.get("fallback_models") or []):
-        if m and m not in chain:
-            chain.append(m)
-    return chain
+        _add(z.get("base_url"), z.get("api_key"), z.get("env_key"),
+             z.get("backend"), m, z.get("provider_name") or "主模型")
+    # ② 跨厂商兜底
+    for p in (z.get("fallback_providers") or []):
+        if not isinstance(p, dict):
+            continue
+        for m in ([p.get("model")] + list(p.get("models") or [])):
+            _add(p.get("base_url"), p.get("api_key"), p.get("env_key"),
+                 p.get("backend"), m, p.get("name") or p.get("base_url") or "兜底")
+    return cands
+
+
+def _should_advance(err, cands, idx):
+    """是否应换下一个候选再试。
+
+    - model/timeout/network/server（RETRYABLE）→ 有机会就换下一个。
+    - quota（429 限流/余额）→ **仅当后面有不属于同一 base_url 的候选**才换，
+      因为同 provider 共用 Key，换模型名逃不掉同一个限流额度。
+    """
+    if idx + 1 >= len(cands):
+        return False
+    kind = (err or {}).get("kind")
+    if kind in RETRYABLE:
+        return True
+    if kind == "quota":
+        cur = cands[idx].get("base_url")
+        return any(c.get("base_url") != cur for c in cands[idx + 1:])
+    return False
 
 
 def chat_stream(messages, model=None, temperature=None, timeout=None,
@@ -396,19 +480,21 @@ def chat_stream(messages, model=None, temperature=None, timeout=None,
                "hint": "打开右上角「设置」填入 Key。"}
         return
 
+    cands = _pick_candidates(model, z)
     last_err = None
-    for m in _pick_models(model, z):
+    for idx, cand in enumerate(cands):
+        m = cand["model"]
         try:
-            resp = _request(messages, m, temperature, timeout, True, max_tokens, z)
+            resp = _request(messages, m, temperature, timeout, True, max_tokens, cand)
         except urllib.error.HTTPError as e:
             last_err = _classify(e, e.code, _read_body(e))
-            if last_err["kind"] in RETRYABLE:
+            if _should_advance(last_err, cands, idx):
                 continue
             yield dict({"type": "error"}, **last_err)
             return
         except Exception as e:
             last_err = _classify(e)
-            if last_err["kind"] in RETRYABLE:
+            if _should_advance(last_err, cands, idx):
                 continue
             yield dict({"type": "error"}, **last_err)
             return
@@ -428,7 +514,7 @@ def chat_stream(messages, model=None, temperature=None, timeout=None,
                     usage = evt["usage"]
         except Exception as e:
             err = _classify(e)
-            if err["kind"] in RETRYABLE:
+            if _should_advance(err, cands, idx):
                 last_err = err
                 continue
             yield dict({"type": "error"}, **err)
@@ -485,11 +571,13 @@ def chat(messages, model=None, temperature=None, timeout=None, max_tokens=None,
         return {"ok": False, "kind": "auth", "message": "尚未配置模型 API Key。",
                 "hint": "打开右上角「设置」填入 Key。"}
 
+    cands = _pick_candidates(model, z)
     last_err = None
-    for m in _pick_models(model, z):
+    for idx, cand in enumerate(cands):
+        m = cand["model"]
         t0 = time.time()
         try:
-            resp = _request(messages, m, temperature, timeout, False, max_tokens, z)
+            resp = _request(messages, m, temperature, timeout, False, max_tokens, cand)
             raw = resp.read().decode("utf-8", "replace")
             data = json.loads(raw)
             content = ""
@@ -504,12 +592,12 @@ def chat(messages, model=None, temperature=None, timeout=None, max_tokens=None,
             body = _read_body(e)
             last_err = _classify(e, e.code, body)
             last_err["body"] = body
-            if last_err["kind"] in RETRYABLE:
+            if _should_advance(last_err, cands, idx):
                 continue
             return dict({"ok": False}, **last_err)
         except Exception as e:
             last_err = _classify(e)
-            if last_err["kind"] in RETRYABLE:
+            if _should_advance(last_err, cands, idx):
                 continue
             return dict({"ok": False}, **last_err)
     return dict({"ok": False}, **(last_err or {"kind": "other", "message": "全部模型均失败"}))

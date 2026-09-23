@@ -655,7 +655,7 @@ $('#btnCrawl').onclick = () => runTask($('#btnCrawl'), '/api/wechat/crawl',
   {
     keyword: $('#wcKeyword').value.trim(), count: +$('#wcCount').value,
     dir: $('#wcDir').value
-  }, '#wcLog', () => loadWechat());
+  }, '#wcLog', (t) => { loadWechat(); renderWechatLocalSummary(t); });
 
 // ------------------------------------------------------------------ 晨会 Report
 let rpHtmls = [];
@@ -1283,7 +1283,12 @@ function astHandleRes(r) {
   if (r.session) AST.session = r.session;
   if (r.kind === 'confirm') { AST.mode = '待确认'; astConfirm(r); return; }
   if (r.kind === 'action') { AST.mode = r.mode === 'sync' ? '已返回' : (r.mode === 'bridge' ? '需桥接' : '任务'); astAction(r); return; }
-  if (r.kind === 'qa') { AST.mode = r.mode === 'llm' ? '模型' : (r.mode === 'bridge' ? '需桥接' : '本地'); astQa(r); return; }
+  if (r.kind === 'qa') {
+    if (r.mode === 'supplementing') { AST.mode = '补抓中'; astSupplementing(r); return; }
+    AST.mode = r.mode === 'llm' ? '模型' : (r.mode === 'bridge' ? '需桥接' : '本地');
+    astQa(r);
+    return;
+  }
   AST.mode = 'error';
   const b = astBox('bot');
   astText(b, (r && (r.error || r.message)) || '未识别的返回', 'err');
@@ -1411,12 +1416,74 @@ function astRenderData(b, d) {
   }
 }
 
+/** 补抓中：不展示任何瑕疵答案，只渲染进度卡；抓完自动补全替换（无需刷新）。 */
+function astSupplementing(r) {
+  const b = astBox('bot');
+  astSources(b, r.sources);
+  const kw = r.keyword ? '「' + esc(r.keyword) + '」' : '';
+  const card = document.createElement('div');
+  card.className = 'ast-supp';
+  card.innerHTML =
+    '<div class="supp-head"><span class="supp-spin"></span>资料不足，正在补抓' + kw + '相关文章…</div>' +
+    '<div class="supp-note faint">已跳过「未成型」的回答，抓取完成后会自动用最新资料重新生成，无需再问。</div>' +
+    '<div class="toolbar"><button class="btn-sm" data-act="retry-now">立即查看</button>' +
+    '<span class="faint supp-msg">后台进行中…</span></div>';
+  b.appendChild(card);
+  astScroll();
+  watchFollowup(r.crawl_task, card);
+}
+
+/** 轮询补答结果：完成后把进度卡替换为完整答案。 */
+function watchFollowup(tid, card) {
+  if (!tid) { if (card) card.querySelector('.supp-msg').textContent = '补抓任务已提交，稍后重新提问即可。'; return; }
+  let done = false;
+  const msg = () => card.querySelector('.supp-msg');
+  const btn = card.querySelector('[data-act="retry-now"]');
+  const tick = async () => {
+    if (done) return;
+    try {
+      const r = await get('/api/assistant/followup?task=' + encodeURIComponent(tid));
+      if (r && r.done) {
+        done = true;
+        if (r.qa && r.qa.answer) {
+          card.remove();
+          astQa(Object.assign({}, r.qa, { sufficiency: { ok: true, retried: true } }));
+          astScroll();
+        } else {
+          if (msg()) msg().textContent = '抓取已结束但未生成答案，可重新提问。';
+          if (btn) btn.disabled = true;
+        }
+        return;
+      }
+      if (msg()) msg().textContent = '后台补抓中…（可关闭本页，抓完再问亦可）';
+    } catch (e) {
+      if (msg()) msg().textContent = '查询补抓状态失败：' + e.message;
+    }
+  };
+  tick();
+  const timer = setInterval(() => { if (done) { clearInterval(timer); return; } tick(); }, 4000);
+  if (btn) btn.onclick = () => tick();
+}
+
 function astQa(r) {
   const b = astBox('bot');
   astSources(b, r.sources);
   astText(b, r.answer);
   const foot = [];
   if (r.mode === 'llm') foot.push(`由 ${esc(r.model || '模型')} 生成 · 检索 ${r.retrieved || 0} 条 · ${r.elapsed || 0}s`);
+  // 检索充分度（CRAG/Self-RAG 简化版：先补后答 + 生成后复判）
+  if (r.sufficiency) {
+    const s = r.sufficiency;
+    if (s.pre_supplied) {
+      const c = s.crawl || {};
+      foot.push(`🔎 资料偏薄，已先补取${c.keyword ? '（' + esc(c.keyword) + (c.added ? '，+' + esc(c.added) + ' 篇' : '') + '）' : ''} 再作答`);
+    } else if (s.retried) {
+      const c = s.crawl || {};
+      foot.push(`🔁 资料不足已自动补取${c.keyword ? '（' + esc(c.keyword) + (c.added ? '，+' + esc(c.added) + ' 篇' : '') + '）' : ''} 并重答`);
+    } else if (s.ok === false) {
+      foot.push(`⚠ 资料可能不足（${esc(s.reason || '')}），可点「重新抓取」补充`);
+    }
+  }
   if (r.mode === 'local') {
     foot.push('模型暂不可用，以上为本地资料陈列');
     if (r.note) foot.push(esc(r.note));
@@ -1517,6 +1584,46 @@ function renderWechatSummary(question, summary, meta, st, outCount) {
     b.appendChild(f);
   }
   astScroll();
+}
+
+/** 舆情页「开始抓取」完成后，把总结渲染到文章列表下方。
+ *  联网优先：t.result.llm_summary 存在则用它（LLM 生成）；否则回退 t.result.local_summary（本地）。
+ *  无内容则隐藏卡片。 */
+function renderWechatLocalSummary(t) {
+  const card = document.getElementById('wcSummaryCard');
+  const el = document.getElementById('wcSummary');
+  if (!card || !el) return;
+  const online = t && t.result && t.result.llm_summary;
+  const ls = online || (t && t.result && t.result.local_summary);
+  if (!ls || !ls.items || !ls.items.length) { card.hidden = true; return; }
+  const hotSrc = (ls.hot_sectors_freq && ls.hot_sectors_freq.length) ? ls.hot_sectors_freq
+               : (ls.hot_sectors || []);
+  const hot = hotSrc.length
+    ? `<div class="wc-sum-hot">热门板块：${hotSrc.map(esc).join(' · ')}</div>` : '';
+  // 主线/异动 规则研判（纯统计，不联网）
+  const judgeParts = [];
+  if (ls.main_lines && ls.main_lines.length)
+    judgeParts.push(`<span class="wc-sum-ml">主线：${ls.main_lines.map(esc).join(' · ')}</span>`);
+  if (ls.anomalies && ls.anomalies.length)
+    judgeParts.push(`<span class="wc-sum-an">异动：${ls.anomalies.map(esc).join(' · ')}</span>`);
+  const judge = judgeParts.length
+    ? `<div class="wc-sum-judge">${judgeParts.join('　')}</div>`
+    : (ls.count >= 2 ? '' : `<div class="wc-sum-judge wc-sum-judge-empty">样本不足 2 篇，暂无主线研判</div>`);
+  const items = ls.items.map((it, i) => {
+    const hits = (it.hits && it.hits.length)
+      ? `<div class="wc-sum-hits">提及：${it.hits.map(esc).join(' · ')}</div>` : '';
+    const meta = [it.source, it.pubtime].filter(Boolean).join(' · ');
+    const metaHtml = meta ? `<div class="wc-sum-meta">${esc(meta)}</div>` : '';
+    const linkHtml = it.url
+      ? `<a class="wc-sum-link" href="${esc(it.url)}" target="_blank" rel="noopener">原文↗</a>` : '';
+    return `<div class="wc-sum-item">
+      <div class="wc-sum-title">${i + 1}. ${esc(it.title || '')}${linkHtml}</div>
+      ${metaHtml}
+      <div class="wc-sum-excerpt">${esc(it.excerpt || '')}</div>${hits}</div>`;
+  }).join('');
+  const tag = online ? '📰 联网总结（LLM）' : '📰 本地速览（未联网）';
+  el.innerHTML = `<div class="wc-sum-head">${tag} · 共 ${ls.count} 篇 · 时段：${esc(ls.period || '综合')}</div>${hot}${judge}${items}`;
+  card.hidden = false;
 }
 
 /** 发送一条用户消息（快捷指令也会走到这里）。 */
@@ -1689,16 +1796,26 @@ function togglePromptPop(show) {
 }
 
 // ------------------------------------------------------------------ 助手模型选择
-// 仅列「实测可直连」的模型（2026-09-03 token.sensenova.cn 实测）：
-//   sensenova-6.8-flash-lite → 返回无 content 字段（reasoning 结构）+ 极慢；
-//   sensenova-6.7-flash-lite → HTTP 404（平台无该 chat 路由）；
-//   kimi-k3                  → temperature 只允许 1（传 0.3 必 400）且当前 TPM 限流。
-// 以上若留在列表，选中后会失败并被兜底链静默降级成 deepseek-v4-flash（即"怎么选都没用"），故剔除。
-const DEFAULT_LLM_MODEL = 'deepseek-v4-flash';  // 全局主模型出厂默认
+// 当前后端直连魔搭 ModelScope（base_url=https://api-inference.modelscope.cn/v1）。
+// 档位按魔搭官方「魔粒扣减」口径标注：
+//   主流 · 1 魔粒/次   旗舰 · 2 魔粒/次
+// 10 个候选均来自用户给定的「主流/旗舰」清单（2026-09-23）。
+// 加新模型：在魔搭 /v1/models 确认 id 后在此追加一条即可（base_url 不用动）。
+const DEFAULT_LLM_MODEL = 'Qwen/Qwen3.5-35B-A3B';  // 全局主模型出厂默认（主流档）
+// 下拉候选：id=模型名，tag=档位标注（主流/旗舰）
 const AST_MODELS = [
-  'deepseek-v4-flash',
-  'glm-5.2',
-  'deepseek-v4-pro',
+  // —— 主流 · 1 魔粒/次
+  { id: 'Qwen/Qwen3.5-35B-A3B',            tag: '主流' },
+  { id: 'ZhipuAI/GLM-4.7-Flash',           tag: '主流' },
+  { id: 'stepfun-ai/Step-3.7-Flash',       tag: '主流' },
+  { id: 'nex-agi/Nex-N2.5-Pro',            tag: '主流' },
+  { id: 'inclusionAI/Ling-3.0-flash',      tag: '主流' },
+  // —— 旗舰 · 2 魔粒/次
+  { id: 'deepseek-ai/DeepSeek-V4-Pro',     tag: '旗舰' },
+  { id: 'Qwen/Qwen3.5-397B-A17B',          tag: '旗舰' },
+  { id: 'ZhipuAI/GLM-5.2',                 tag: '旗舰' },
+  { id: 'deepseek-ai/DeepSeek-V4.1-Flash', tag: '旗舰' },
+  { id: 'deepseek-ai/DeepSeek-V4-Flash-0731', tag: '旗舰' },
 ];
 
 function renderAssistantModels() {
@@ -1718,17 +1835,18 @@ function renderAssistantModels() {
   // API 直连：下拉框选择模型（不铺满 7 个按钮）
   bar.style.display = '';
   const opts = AST_MODELS.map(m => {
-    const sel = (m === cur) ? ' selected' : '';
-    return `<option value="${esc(m)}"${sel}>${esc(m)}</option>`;
+    const sel = (m.id === cur) ? ' selected' : '';
+    return `<option value="${esc(m.id)}"${sel}>${esc(m.id)}（${esc(m.tag)}）</option>`;
   }).join('');
   bar.innerHTML = `<select id="astModelSelect" class="model-select">${opts}</select>`;
   const sel = bar.querySelector('#astModelSelect');
   sel.onchange = () => selectAssistantModel(sel.value);
-  if (note) note.textContent = '当前对话模型：' + cur + ' · 云端直连';
+  const curTag = (AST_MODELS.find(m => m.id === cur) || { tag: '' }).tag;
+  if (note) note.textContent = '当前对话模型：' + cur + (curTag ? '（' + curTag + '）' : '') + ' · 云端直连';
 }
 
 async function selectAssistantModel(id) {
-  // 直接改全局 llm.model 为所选具体模型（空值时回落出厂默认 deepseek-v4-flash）
+  // 直接改全局 llm.model 为所选具体模型（空值时回落出厂默认 Qwen/Qwen3.5-35B-A3B）
   const model = id || DEFAULT_LLM_MODEL;
   const res = await post('/api/config', { llm: { model }, assistant: { model: '' } });
   if (!res.ok) { alert('保存失败：' + (res.error || '未知')); return; }

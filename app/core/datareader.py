@@ -502,7 +502,13 @@ def _wechat_meta(path):
 
 
 def wechat_lookup(query, limit=3):
-    snips = []
+    """查公众号热文原文（Wechat/*.docx）。
+
+    稀疏打分（score_text）命中正常返回；当有可匹配词但全部不命中时，
+    退回时间倒序返回前 limit 篇（score=0），避免问法绕一点就完全召回不到。
+    """
+    toks = _tokens(query)
+    cands = []
     for p in wechat_docs(limit=12):
         d = read_docx(p, max_chars=20000)
         if d.get("error") or not d["paragraphs"]:
@@ -510,14 +516,15 @@ def wechat_lookup(query, limit=3):
         meta = _wechat_meta(p)
         url = (meta or {}).get("url") if meta else ""
         head = "\n".join(d["paragraphs"][:40])
-        sc = score_text(head, _tokens(query))
-        if sc or not query:
-            snips.append(_snip("wechat", d["title"][:60], d["path"],
-                               "\n".join(d["paragraphs"][1:12])[:1200], sc, url=url))
-        if len(snips) >= limit:
-            break
-    snips.sort(key=lambda s: -s.get("score", 0))
-    return snips[:limit]
+        sc = score_text(head, toks)
+        cands.append((sc, _snip("wechat", d["title"][:60], d["path"],
+                                "\n".join(d["paragraphs"][1:12])[:1200], sc, url=url)))
+    # 零命中兜底：有可匹配词但关键词全不中 → 退回时间倒序，避免完全召回不到
+    if toks and not any(s > 0 for s, _ in cands):
+        return [c for s, c in cands[:limit]]
+    picked = [(s, c) for s, c in cands if s or not query]
+    picked.sort(key=lambda x: -x[0])
+    return [c for s, c in picked[:limit]]
 
 
 def digest_lookup(query, limit=2):
@@ -535,7 +542,7 @@ def digest_lookup(query, limit=2):
     if not os.path.isdir(ddir):
         return []
     toks = _tokens(query)
-    snips = []
+    cands = []
     for name in sorted(os.listdir(ddir), reverse=True):   # 新的时段在前
         if not name.lower().endswith(".txt"):
             continue
@@ -546,13 +553,14 @@ def digest_lookup(query, limit=2):
             continue
         match_text = name[:-4] + "\n" + body   # 文件名也参与打分
         sc = score_text(match_text, toks) if toks else 1
-        if sc or not query:
-            snips.append(_snip("digest", name[:-4], p.replace("\\", "/"),
-                               body[:1500], sc, url=""))
-        if len(snips) >= limit * 3:
-            break
-    snips.sort(key=lambda s: -s.get("score", 0))
-    return snips[:limit]
+        cands.append((sc, _snip("digest", name[:-4], p.replace("\\", "/"),
+                               body[:1500], sc, url="")))
+    # 零命中兜底：有可匹配词但关键词全不中 → 退回时间倒序，避免完全召回不到
+    if toks and not any(s > 0 for s, _ in cands):
+        return [c for s, c in cands[:limit]]
+    picked = [(s, c) for s, c in cands if s or not query]
+    picked.sort(key=lambda x: -x[0])
+    return [c for s, c in picked[:limit]]
 
 
 # ---------------------------------------------------------------- 晨会 Report

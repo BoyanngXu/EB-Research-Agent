@@ -239,6 +239,24 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .log .l-info { color: var(--on-dark); }
 .log:empty::after { content: "（暂无输出）"; color: var(--on-dark-dim); }
 
+/* 舆情页：抓取后本地速览（不联网，纯结构化陈列） */
+.wc-sum-head { font-weight: 600; margin-bottom: 6px; }
+.wc-sum-hot { color: var(--brand); font-size: 13px; margin-bottom: 8px; }
+.wc-sum-judge { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 2px 0 10px;
+  padding: 8px 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px; }
+.wc-sum-ml { color: var(--brand); font-weight: 600; }
+.wc-sum-an { color: var(--text-faint); }
+.wc-sum-judge-empty { color: var(--text-faint); font-size: 12px; font-weight: 400; }
+.wc-sum-item { padding: 8px 0; border-top: 1px solid var(--border); }
+.wc-sum-item:first-of-type { border-top: 0; }
+.wc-sum-title { font-weight: 600; }
+.wc-sum-excerpt { color: var(--text-faint); font-size: 13px; margin: 4px 0; line-height: 1.65; }
+.wc-sum-hits { color: var(--ok); font-size: 12px; }
+.wc-sum-meta { color: var(--text-faint); font-size: 12px; margin: 2px 0; }
+.wc-sum-link { font-size: 12px; color: var(--brand); text-decoration: none; margin-left: 6px; }
+.wc-sum-link:hover { text-decoration: underline; }
+
 /* ---------------- 终端 ---------------- */
 .term-out {
   background: var(--surface-dark-2); color: var(--on-dark); border: 1px solid var(--surface-dark-border); border-radius: var(--r-sm);
@@ -300,6 +318,18 @@ details > summary { cursor: pointer; font-size: var(--fs-sm); color: var(--brand
 .bridge-result { background: var(--panel); resize: vertical; }
 .bridge-inline { margin-top: 10px; }
 .bridge-inline .bridge-prompt { max-height: 260px; }
+
+/* 补抓进度卡（资料不足时先补再答，不展示瑕疵答案） */
+.ast-supp { margin-top: 8px; padding: 12px 14px; border: 1px solid var(--brand-soft);
+            background: var(--brand-soft); border-radius: var(--radius); }
+.ast-supp .supp-head { display: flex; align-items: center; gap: 8px;
+                       font-size: var(--fs-md); font-weight: 600; color: var(--brand-text); }
+.ast-supp .supp-note { margin: 6px 0 8px; line-height: 1.5; }
+.ast-supp .supp-msg { margin-left: 8px; }
+.supp-spin { width: 12px; height: 12px; border: 2px solid var(--brand);
+             border-top-color: transparent; border-radius: 50%;
+             display: inline-block; animation: supp-rot .8s linear infinite; }
+@keyframes supp-rot { to { transform: rotate(360deg); } }
 
 /* 确认弹窗 */
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 999; }

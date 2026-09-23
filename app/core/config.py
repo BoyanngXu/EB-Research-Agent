@@ -25,11 +25,15 @@ DEFAULT_API_KEY = ""  # 留空：优先读环境变量 SENSENOVA_API_KEY，其�
 
 DEFAULTS = {
     "llm": {
-        "backend": "api",                               # api=商汤云端 / workbuddy=文件桥接(交WorkBuddy跑,零外部token)
+        "backend": "api",                               # api=云端直连 / workbuddy=文件桥接(交WorkBuddy跑,零外部token)
+        "provider_name": "SenseNova",                  # 主 provider 显示名（仅用于日志/提示）
         "api_key": DEFAULT_API_KEY,
         "base_url": "https://token.sensenova.cn/v1",   # 商汤 SenseNova（OpenAI 兼容）
         "model": "deepseek-v4-flash",
-        "fallback_models": ["deepseek-v4-flash"],
+        "fallback_models": ["deepseek-v4-flash"],      # 同一 provider 内换模型名兜底
+        # 跨厂商兜底：主 provider 限流/宕机时，换**另一家**的 Key 继续（同 provider 换模型名逃不掉同一个限流额度）。
+        # 每项：{"name": "显示名", "base_url": "…/v1", "api_key": "…", "env_key": "环境变量名", "model": "模型名"}
+        "fallback_providers": [],
         "temperature": 0.2,
         "timeout": 180,
         "env_key": "SENSENOVA_API_KEY",                # 环境变量名，用作 Key 回退
@@ -74,6 +78,14 @@ DEFAULTS = {
         "need_confirm": True,    # 执行动作前先弹确认卡
         "max_ctx_chars": 12000,  # 喂给模型的检索片段总上限
         "max_history": 12,       # 带进模型的当前会话轮数
+        # —— 检索充分度（CRAG/Self-RAG 简化版）：先补后答 + 生成后复判
+        "pre_check": True,           # 生成前先判检索是否足够，不足则先补抓再生成（先补后答）
+        "sufficiency_check": True,   # 是否启用生成后复判
+        "sufficiency_retry": True,   # 复判不足时是否自动补取并重答
+        "sufficiency_crawl": True,   # 补取是否真的抓公众号（关闭则只做复判不抓）
+        "min_snippets": 3,           # 片段数低于此即判不足
+        "sufficiency_count": 6,      # 补取时抓取篇数
+        "sufficiency_wait": 45,      # 补取任务最长等待（秒）：超时转后台，不阻塞问答
     },
     # 跨会话记忆（runtime/memory/<session>.jsonl）
     "memory": {
@@ -159,16 +171,30 @@ def save(patch):
 def public_view():
     """给前端的配置视图：密钥打码，避免截图外泄。"""
     c = load()
+    def _mask(k):
+        k = k or ""
+        return (k[:6] + "*" * max(0, len(k) - 10) + k[-4:]) if len(k) > 12 else ("已配置" if k else "")
+
     key = c["llm"].get("api_key", "")
-    masked = (key[:6] + "*" * max(0, len(key) - 10) + key[-4:]) if len(key) > 12 else ("已配置" if key else "")
+    masked = _mask(key)
+    providers = []
+    for p in (c["llm"].get("fallback_providers") or []):
+        if not isinstance(p, dict):
+            continue
+        providers.append({"name": p.get("name", ""), "base_url": p.get("base_url", ""),
+                          "model": p.get("model", ""), "env_key": p.get("env_key", ""),
+                          "api_key_masked": _mask(p.get("api_key", "")),
+                          "has_key": bool(p.get("api_key") or (p.get("env_key") and os.environ.get(p.get("env_key"))))})
     return {
         "llm": {
             "api_key_masked": masked,
             "has_key": bool(key),
             "backend": c["llm"].get("backend", "api"),
+            "provider_name": c["llm"].get("provider_name", ""),
             "base_url": c["llm"]["base_url"],
             "model": c["llm"]["model"],
             "fallback_models": c["llm"]["fallback_models"],
+            "fallback_providers": providers,
             "temperature": c["llm"]["temperature"],
             "timeout": c["llm"]["timeout"],
             "env_key": c["llm"].get("env_key", ""),
