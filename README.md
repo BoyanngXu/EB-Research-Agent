@@ -1,11 +1,13 @@
 # EB 投研 Agent 平台
 
 把 **Data（成交估值数据）／ Anno（公告情报）／ Wechat（市场舆情）** 三件事
-整合进一个浏览器界面，用**商汤 SenseNova（OpenAI 兼容接口）** 承担其中"必须读懂才能做"的环节。
+整合进一个浏览器界面，并内置一个**首页对话助手（Agentic RAG）**；"必须读懂才能做"的环节由
+**魔搭 ModelScope（OpenAI 兼容接口）** 承担。
 
-整个文件夹**拷走即用**：服务本体只用 Python 标准库，不装第三方包也能起来；
-项目里已自带 `.venv`（含 Excel / PDF / 爬虫等依赖），换电脑时**连虚拟环境一起拷**即可，
-不必依赖目标机上装没装 Python。
+服务本体**零依赖**（纯 Python 标准库），不装任何第三方包也能起；但 Data/Anno/Wechat 的工具脚本
+需要 `openpyxl / pdfplumber / playwright / python-docx` 等，由 `.venv` 提供。
+> 本仓库**不含 `.venv`**（体积大，已 gitignore）：clone 后按「三、运行环境」一条命令建好即可。
+> 若你是从同事那**整目录拷来**（含 `.venv`），则可直接双击启动，无需自建环境。
 
 ---
 
@@ -58,6 +60,13 @@ python main.py --no-browser    # 不开浏览器
 - 首次跑要扫码登录微信读书，之后自动复用登录态。
 - 抓完点标题直接读正文。
 
+### 🤖 首页对话助手（Agentic RAG）
+- 首页直接问投研问题，助手从 **9 类内部源**检索作答：历史对话 / 公告 Anno / 成交估值 Data / 晨会观点 /
+  回测 / 舆情文章 / 舆情记忆 / 任务日志 / 精读口径。
+- **模型下拉 10 档**：按魔搭官方档位标注「主流 / 旗舰」（主流 1 魔粒/次、旗舰 2 魔粒/次），默认 `Qwen/Qwen3.5-35B-A3B`。
+- **检索不足自动补料（A+B）**：生成前先判检索证据够不够（片段数 / 对比类是否有可支撑正文）；不足则**先补抓舆情再答**，
+  不把匮乏答案当结果。补抓还没好时前端显示**进度卡**（不回显半成品），抓完后台**自动补答**并替换答案，无需刷新或重问。
+
 ---
 
 ## 三、运行环境
@@ -88,13 +97,13 @@ python -m venv .venv
 
 ---
 
-## 四、模型 API（商汤 SenseNova）
+## 四、模型 API（魔搭 ModelScope）
 
-在 **总览 · 设置** 页填 API Key（只存本机 `config.json`，不上传）。
-也可以设环境变量 `SENSENOVA_API_KEY`，两者都没配时 AI 精读会提示配置。
+在 **总览 · 设置** 页填 API Key（只存本机 `config.json`，不上传；仓库里只有 `config.example.json` 模板）。
+也可以设环境变量 `MODELSCOPE_API_KEY`，两者都没配时 AI 精读会提示配置。
 
-- 接口为 OpenAI 兼容格式：`https://token.sensenova.cn/v1`，主模型默认 `deepseek-v4-flash`，
-  失败会沿**兜底链**自动降级（可改）。
+- 接口为 OpenAI 兼容格式：`https://api-inference.modelscope.cn/v1`，主模型默认 `Qwen/Qwen3.5-35B-A3B`
+  （免费主流档），可用 `Qwen/Qwen3.5-27B` 等；失败会沿**兜底链**（`fallback_models` / `fallback_providers`）自动降级（可改）。
 - 点「测试连接」验证。右上角小圆点常显状态：绿=可用，灰=未知，红=不可用。
 
 **余额不足/无资源包**时，AI 精读会失败，但下载／重建／抓取不受影响——
@@ -102,7 +111,7 @@ python -m venv .venv
 
 ### 省 token：WorkBuddy 桥接后端
 
-不想花商汤 token，可以把 LLM 后端切到 **「WorkBuddy 桥接」**（总览 · 设置 页 → 模型后端）。
+不想花模型 API token，可以把 LLM 后端切到 **「WorkBuddy 桥接」**（总览 · 设置 页 → 模型后端）。
 此模式**完全不联网、不调用任何 API**：
 
 1. 在公告页点「开始精读」后，平台把每份公告的 prompt（系统提示 + 正文）写成文件，
@@ -125,10 +134,10 @@ EB-Agent/
 ├── main.py                 启动入口（python main.py）
 ├── 启动平台.bat             Windows 双击启动（可能被 IE 区域拦截）
 ├── 启动平台.vbs             双击启动（推荐，不被 .bat 的区域限制拦截）
-├── config.json             配置（含 API Key / 工作区路径）
+├── config.json             配置（含 API Key / 工作区路径，本地文件，gitignore）
 ├── requirements.txt        核心依赖清单
 ├── requirements-extra.txt  可选依赖（自动下载用：playwright / ddddocr）
-├── .venv/                  自带虚拟环境（启动器首选；约 190MB）
+├── .venv/                  虚拟环境（gitignore，需自建；启动器首选）
 ├── app/
 │   ├── core/               内核：配置 / 环境自检 / 文件护栏 / 任务系统 / LLM 客户端
 │   ├── projects/           三个项目的业务封装（anno / data / wechat）
@@ -147,7 +156,7 @@ EB-Agent/
 | 现象 | 原因与处理 |
 |------|-----------|
 | 端口被占用 | `python main.py --port 9000` |
-| AI 精读报「余额不足」 | 商汤账户需充值，或换一个有余量的 Key |
+| AI 精读报「余额不足」 | 魔搭账户需充值，或换一个有余量的 Key |
 | 预览表格报「缺依赖」 | 总览 · 设置 → 运行环境 → 点「安装」 |
 | 抓取公众号卡在登录 | 微信读书必须**有窗口**扫码，平台已默认全部有头模式、无无头选项；登录态存本地后自动复用 |
 | xxxxx下载失败 | 验证码识别需要窗口兜底，首次别勾无头 |
